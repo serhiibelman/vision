@@ -1,0 +1,49 @@
+[project]
+name = "car-tracker"
+version = "0.1.0"
+description = "Detect moving cars in nadir drone footage and plot their geo-referenced paths on a map"
+requires-python = ">=3.10"
+
+# NOTE: AGPL is inherited via the optional `detect` extra (ultralytics), which is
+# copyleft. Installing only the core dependencies keeps this subproject on
+# permissive licences (BSD / MIT / Apache-2.0). See docs/car_tracker/ for the note.
+license = { text = "AGPL-3.0-or-later" }
+
+# Core: required under every branch of the design. All permissive.
+dependencies = [
+    "numpy>=1.26",        # BSD
+    "pandas>=2.2",        # BSD    — telemetry table
+    "opencv-python>=4.10", # Apache-2.0 — video decode, optical flow, warping
+    "pyproj>=3.6",        # MIT    — local ENU / geodesy
+    "folium>=0.17",       # MIT    — map output
+    "scipy>=1.13",        # BSD    — linear_sum_assignment, savgol_filter
+]
+
+[project.optional-dependencies]
+# Quarantined so removal stays a one-line change and the copyleft boundary is explicit.
+# torch/torchvision are pulled in transitively; install them FIRST from the correct
+# index (CUDA vs CPU) because the wheel variant cannot be declared portably here:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+detect = ["ultralytics>=8.3"]   # AGPL-3.0
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+car-tracker = "car_tracker.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/car_tracker"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

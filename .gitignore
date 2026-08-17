@@ -1,0 +1,32 @@
+# IDE
+.idea/
+.vscode/
+
+# Assignment inputs (video2.MP4 is 656 MB — transferred out of band)
+tech-assignment/
+
+# Original camera footage, in case it ever lands outside tech-assignment/.
+# Deliberately uppercase only: DJI writes .MP4, while the short annotated
+# demo clip we DO commit is written as lowercase .mp4.
+*.MP4
+*.SRT
+
+# Per-subproject working artifacts (intermediate, regenerable, possibly large).
+# Final small deliverables belong in */results/ instead, which IS committed.
+*/outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Model weights (downloaded on demand)
+*.pt
+*.onnx

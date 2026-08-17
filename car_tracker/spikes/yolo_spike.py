@@ -1,4 +1,5 @@
-"""Spike: does COCO-pretrained YOLO detect cars in nadir drone footage?
+"""
+Spike: does COCO-pretrained YOLO detect cars in nadir drone footage?
 
 This is a throwaway experiment, deliberately kept outside the ``car_tracker``
 package. It exists to answer one go/no-go question before the real detection stage
@@ -67,7 +68,9 @@ CAR_LENGTH_M = 4.5
 
 @dataclass
 class Config:
-    """One detector configuration under test."""
+    """
+    One detector configuration under test.
+    """
 
     key: str
     weights: str
@@ -91,7 +94,9 @@ CONFIGS = {
 
 @dataclass
 class FrameInfo:
-    """A sampled frame plus the telemetry-derived scale expected at that moment."""
+    """
+    A sampled frame plus the telemetry-derived scale expected at that moment.
+    """
 
     index: int  # 1-based, matching the SRT's FrameCnt
     rel_alt: float
@@ -102,7 +107,8 @@ class FrameInfo:
 
 
 def parse_rel_alt(srt_path: Path) -> dict[int, float]:
-    """Map 1-based frame number -> relative altitude in metres.
+    """
+    Map 1-based frame number -> relative altitude in metres.
 
     A minimal stand-in for the real telemetry parser, which does not exist yet.
     ``FrameCnt`` and ``rel_alt`` each occur exactly once per SRT block and in the
@@ -117,14 +123,17 @@ def parse_rel_alt(srt_path: Path) -> dict[int, float]:
 
 
 def gsd_for_altitude(alt_m: float, image_width_px: int) -> float:
-    """Ground sample distance (metres per pixel) for a nadir camera at ``alt_m``."""
+    """
+    Ground sample distance (metres per pixel) for a nadir camera at ``alt_m``.
+    """
     half_fov = np.arctan(SENSOR_W_EQUIV_MM / (2 * FOCAL_EQUIV_MM))
     ground_width_m = 2 * alt_m * np.tan(half_fov)
     return ground_width_m / image_width_px
 
 
 def tile_origins(width: int, height: int, tile: int, stride: int) -> list[tuple[int, int]]:
-    """Top-left corners covering the frame, with the final row/column clamped inward.
+    """
+    Top-left corners covering the frame, with the final row/column clamped inward.
 
     Clamping (rather than padding) keeps every tile full-size, so the model never
     sees black borders, at the cost of slightly more overlap at the edges.
@@ -142,7 +151,8 @@ def tile_origins(width: int, height: int, tile: int, stride: int) -> list[tuple[
 
 
 def nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float = 0.5) -> list[int]:
-    """Plain greedy non-maximum suppression over xyxy boxes.
+    """
+    Plain greedy non-maximum suppression over xyxy boxes.
 
     Hand-rolled to keep the spike free of a torchvision import; the merge across
     overlapping tiles is the only place suppression is needed.
@@ -170,7 +180,8 @@ def nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float = 0.5) -> li
 
 
 def _extract(res, obb: bool) -> tuple[np.ndarray, np.ndarray]:
-    """Pull axis-aligned xyxy boxes and confidences out of a Results object.
+    """
+    Pull axis-aligned xyxy boxes and confidences out of a Results object.
 
     Oriented-box models expose ``res.obb`` instead of ``res.boxes``. The oriented
     box's own axis-aligned envelope (``.xyxy``) is used here so both model families
@@ -184,7 +195,9 @@ def _extract(res, obb: bool) -> tuple[np.ndarray, np.ndarray]:
 
 
 def detect(model, frame: np.ndarray, cfg: Config) -> tuple[np.ndarray, np.ndarray]:
-    """Run one configuration on one frame; return (xyxy boxes, confidences)."""
+    """
+    Run one configuration on one frame; return (xyxy boxes, confidences).
+    """
     height, width = frame.shape[:2]
 
     if not cfg.tiled:
@@ -214,7 +227,9 @@ def detect(model, frame: np.ndarray, cfg: Config) -> tuple[np.ndarray, np.ndarra
 def annotate(
     frame: np.ndarray, boxes: np.ndarray, confs: np.ndarray, caption: str
 ) -> np.ndarray:
-    """Draw detections and a caption banner onto a copy of the frame."""
+    """
+    Draw detections and a caption banner onto a copy of the frame.
+    """
     canvas = frame.copy()
     for (x1, y1, x2, y2), conf in zip(boxes, confs, strict=True):
         p1, p2 = (int(x1), int(y1)), (int(x2), int(y2))
@@ -232,7 +247,9 @@ def annotate(
 
 
 def pick_device() -> str | int:
-    """CUDA, else Apple MPS, else CPU. Never hardcoded — the repo runs on both."""
+    """
+    CUDA, else Apple MPS, else CPU. Never hardcoded — the repo runs on both.
+    """
     import torch
 
     if torch.cuda.is_available():

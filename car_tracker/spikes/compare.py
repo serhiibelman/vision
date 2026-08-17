@@ -1,4 +1,5 @@
-"""Manual-inspection helper for the detector spike.
+"""
+Manual-inspection helper for the detector spike.
 
 Two ways to eyeball which model found which car:
 
@@ -51,7 +52,8 @@ GREEN = (0, 255, 0)    # BGR — right/second model
 def detect_with_polys(
     model, frame: np.ndarray, cfg
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-    """Detect and also return oriented-box corners when the model provides them.
+    """
+    Detect and also return oriented-box corners when the model provides them.
 
     Returns ``(xyxy, conf, polys)`` where ``polys`` has shape (n, 4, 2) for oriented
     models and is ``None`` otherwise. Non-maximum suppression runs on the
@@ -94,7 +96,9 @@ def draw(
     colour: tuple[int, int, int],
     label_side: str,
 ) -> None:
-    """Draw one model's detections in ``colour``, in place."""
+    """
+    Draw one model's detections in ``colour``, in place.
+    """
     for i, ((x1, y1, x2, y2), c) in enumerate(zip(xyxy, conf, strict=True)):
         if polys is not None:
             cv2.polylines(canvas, [polys[i].astype(np.int32)], True, colour, 2)
@@ -109,7 +113,9 @@ def draw(
 
 
 def build_overlay(frames: list[int], left_key: str, right_key: str) -> None:
-    """Render both models onto one image per requested frame."""
+    """
+    Render both models onto one image per requested frame.
+    """
     from ultralytics import YOLO
 
     device = pick_device()
@@ -156,7 +162,9 @@ def build_overlay(frames: list[int], left_key: str, right_key: str) -> None:
 
 
 def build_gallery() -> None:
-    """Write an HTML page pairing existing annotated frames across configs."""
+    """
+    Write an HTML page pairing existing annotated frames across configs.
+    """
     present = [k for k in CONFIGS if (OUT / k).is_dir() and any((OUT / k).glob("*.jpg"))]
     if not present:
         raise SystemExit(f"no annotated frames under {OUT} — run yolo_spike.py first")
@@ -181,7 +189,9 @@ def build_gallery() -> None:
             "</figure>"
             for p in overlays
         )
-        rows.insert(0, f"<section><h2>Two-colour overlays</h2><div class=grid>{cells}</div></section>")
+        rows.insert(
+            0, f"<section><h2>Two-colour overlays</h2><div class=grid>{cells}</div></section>"
+        )
 
     html = f"""<!doctype html>
 <meta charset="utf-8"><title>Detector spike — manual comparison</title>

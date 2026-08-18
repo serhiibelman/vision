@@ -1,6 +1,7 @@
-# IDE
+# IDE / tooling
 .idea/
 .vscode/
+.claude/
 
 # Assignment inputs (video2.MP4 is 656 MB — transferred out of band)
 tech-assignment/

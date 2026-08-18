@@ -1,36 +1,50 @@
 
 # visualization
 
-`car_tracker/src/car_tracker/visualization.py` — renders maps. Flight path implemented; car
-tracks pending.
+`car_tracker/src/car_tracker/visualization.py` — renders maps. Implemented.
 
 ## API
 
 ```python
-from car_tracker.telemetry import load
-from car_tracker.visualization import render_flight_path
+from car_tracker.visualization import render_tracks, render_flight_path
 
-render_flight_path(load("video2.SRT"), "outputs/flight_path.html")
+render_flight_path(telemetry, "outputs/flight_path.html")
+render_tracks(moving, features, "results/map.html",
+              telemetry=segment, all_tracks=tracks)
 ```
 
 | Function | Does |
 |---|---|
-| `render_flight_path(telemetry, out_path, step=10)` | standalone HTML map |
+| `render_tracks(tracks, features, out, telemetry, all_tracks)` | **the deliverable map** |
+| `render_flight_path(telemetry, out_path, step=10)` | drone track only |
 | `base_map(lat, lon, zoom=None)` | empty map, satellite + street layers |
-| `add_flight_path(fmap, telemetry, step=10)` | draw track onto an existing map |
+| `add_car_tracks(fmap, tracks, features)` | car paths onto an existing map |
+| `add_rejected_tracks(fmap, tracks, features)` | parked tracks, hidden layer |
+| `add_flight_path(fmap, telemetry, step=10)` | drone track onto an existing map |
 | `path_length_m(lat, lon)` | ground distance along a polyline, metres |
 
 ## Output
 
-`outputs/flight_path.html` — 28 KB, self-contained, opens in any browser.
+`results/map.html` — 48 KB, self-contained, opens in any browser.
 
-- Red polyline = drone track
-- Green/red markers = start/end
-- 12 circle probes with tooltips: frame, time, altitude, yaw, GSD
-- Layer toggle: Esri satellite (default) / OpenStreetMap
+| Layer | Content |
+|---|---|
+| Moving cars | one coloured polyline per car; dot = start, triangle = end |
+| Rejected (parked) | grey dashed, **hidden by default**, tooltip names the reason |
+| Drone flight path | red line, altitude/yaw/GSD probe tooltips |
+| Satellite / Street | basemap toggle |
 
-Satellite is the default base layer because roads and vehicles must be visible;
-OSM's rendering hides both under labels.
+Car tooltips carry speed in km/h, displacement in metres and duration.
+
+`outputs/flight_path.html` (28 KB) is the flight path alone, from
+`render_flight_path`.
+
+Satellite is the default base layer because roads and vehicles must be visible; OSM's
+rendering hides both under labels.
+
+Rejected tracks are drawn on purpose: if a genuine car was filtered out by
+[postprocess](postprocess.md), that layer is where it shows up. Start and end markers
+differ in shape because direction of travel is otherwise ambiguous on a bare line.
 
 ## Notes
 
@@ -66,5 +80,6 @@ Also used to pick the static landmark for step 3 calibration.
 
 ## Tests
 
-`car_tracker/tests/test_visualization.py` — 12 tests. Geodesic distance against a known
+`car_tracker/tests/test_visualization.py` — 19 tests, including car-track rendering with
+speed labels and the rejected layer. Geodesic distance against a known
 1-degree baseline, layer presence, HTML output, decimation, single-row edge case.

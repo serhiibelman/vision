@@ -83,6 +83,94 @@ In metres the gate is physical: a car cannot move more than ~3 m in 0.1 s.
 
 ---
 
+## D5 — Calibrate the pixel-to-ground transform from the footage
+
+**Date:** 2026-08-17
+**Choice:** measure metres-per-pixel and the image→north rotation from data
+(GPS displacement ÷ pixel shift). Keep the measurement even though the spec turned
+out to be nearly right — see the correction below.
+
+> **CORRECTED 2026-08-17.** This entry originally concluded the spec GSD was ~30%
+> wrong, based on measuring car lengths. Calibration showed `gsd_scale = 1.036` —
+> the spec is accurate to 3.6%. The car-length method was the flawed part:
+> DOTA-OBB boxes are systematically tight (70 px × 4.77 cm/px = **3.34 m** for a real
+> ~4.3 m car, so boxes undersize by ~25%). The caveats listed below were the right
+> ones; they were simply weighted too lightly against an assumption-free measurement.
+>
+> **Carry-forward rule: never use detector box dimensions as a length estimate.**
+
+**Camera identified:** MP4 metadata contains `DJI M3T` — Mavic 3 Thermal. Its wide
+camera is 1/2" CMOS, f/2.8, **24 mm equivalent**, DFOV 84°. The SRT's `fnum: 2.8`
+matches, so `focal_len: 24.00` is confirmed to be the **35 mm equivalent**, not the
+actual focal length. That question is closed.
+
+**But the spec-derived GSD is still wrong.** Measured car length against the value
+predicted from a 24 mm-equivalent lens on a 1920 px frame:
+
+| Frame | Alt | Car measured | Spec predicts | Measured GSD | Spec GSD | Ratio |
+|---|---|---|---|---|---|---|
+| 4979 | 61.0 m | 70 px (n=15) | 94 px | 6.42 cm/px | 4.77 | 1.35× |
+| 4717 | 60.9 m | 74 px (n=18) | 95 px | 6.06 cm/px | 4.76 | 1.27× |
+
+Cars appear ~25–35% smaller than predicted, so the true field of view is wider than
+the still-photo spec implies — most likely because 1080p 16:9 uses a wider crop of
+the sensor.
+
+**Caveats on that measurement** (indicative, not exact): car length was assumed to be
+4.5 m (real range 4.0–4.8 m), and detector boxes typically undersize by 5–10%.
+Neither accounts for a full 1.3× alone, so a genuine discrepancy exists.
+
+**Why it matters:** shipping the spec value would make every distance and speed
+~30% wrong.
+
+**Method chosen** — assumption-free, needs no sensor spec, no car length, no box
+accuracy:
+
+```
+GSD [m/px] = GPS displacement between two frames [m] / static ground shift [px]
+```
+
+`telemetry.gsd` is therefore labelled provisional and is superseded by
+`calibrate.py`.
+
+**Measured result** — 40 pairs sampled across the flight, 15 frames apart, filtered
+to near-constant yaw and altitude:
+
+```
+pairs measured   35 of 40        inliers/pair  median 184
+gsd_spec         7.91 cm/px      gsd_measured  8.04 cm/px
+gsd_scale        1.036           (IQR 1.011 .. 1.059)
+yaw convention   rotation = +1 * yaw - 0.39 deg   (spread 0.75 deg)
+residual         0.29 m
+```
+
+**Yaw convention resolved:** DJI's `gb_yaw` is directly the bearing of image-up.
+Sign `+1`, offset −0.39°, consistent to 0.75° across headings from −170° to +175°.
+No mirroring.
+
+**Gate passed:** a static ground point projects to within 0.29 m from two different
+frames, below GPS noise. Downstream stages are safe to build.
+
+**Why keep calibration now that the spec proved close?** It cost nothing to run, it
+is what *proved* the spec correct, and the 0.29 m residual is the accuracy figure the
+deliverable needs to report. Trusting the spec without it would have been a guess
+that happened to be right.
+
+---
+
+## D6 — Residual measured from tracked features, not a hand-picked landmark
+
+**Date:** 2026-08-17
+**Choice:** validate calibration by projecting every RANSAC inlier from both frames of
+a pair and measuring how far the two projections disagree.
+
+**Why:** the original plan was to hand-pick a building corner and check that it holds
+still. Tracked features are already static ground points by construction — RANSAC
+rejected anything moving — so this yields hundreds of samples per pair automatically,
+with no manual step and no risk of picking an unlucky landmark.
+
+---
+
 ## Open
 
 - Static-vs-moving filter thresholds — needs real tracks first.

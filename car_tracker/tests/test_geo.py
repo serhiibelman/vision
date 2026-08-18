@@ -79,6 +79,20 @@ class TestMetreConversions:
         assert lat.shape == (2,)
         assert lat[0] > lat[1]
 
+    def test_scalar_origin_against_array_of_offsets(self):
+        """
+        pyproj needs equal-length inputs, so a scalar origin must be broadcast.
+        """
+        lat, lon = metres_to_latlon(LAT, LON, np.array([0.0, 100.0]), np.array([100.0, 0.0]))
+        assert lat.shape == (2,)
+
+    def test_inverse_broadcasts_scalar_origin(self):
+        east, north = latlon_to_metres(
+            LAT, LON, np.array([LAT, LAT + 0.001]), np.array([LON, LON])
+        )
+        assert east.shape == (2,)
+        assert north[1] > north[0]
+
 
 class TestDistanceAndBearing:
     def test_known_distance(self):
@@ -98,6 +112,15 @@ class TestDistanceAndBearing:
     def test_bearing_is_in_range(self):
         got = bearing_deg(LAT, LON, LAT - 0.01, LON - 0.01)
         assert 0.0 <= got < 360.0
+
+    def test_distance_broadcasts_scalar_against_array(self):
+        got = haversine_m(LAT, LON, np.array([LAT, LAT + 0.001]), np.array([LON, LON]))
+        assert got.shape == (2,)
+        assert got[0] == pytest.approx(0.0, abs=1e-6)
+
+    def test_bearing_broadcasts_scalar_against_array(self):
+        got = bearing_deg(LAT, LON, np.array([LAT + 0.001, LAT - 0.001]), np.array([LON, LON]))
+        assert got == pytest.approx([0.0, 180.0], abs=0.5)
 
 
 class TestCalibration:

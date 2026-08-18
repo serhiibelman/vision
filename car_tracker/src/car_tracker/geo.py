@@ -39,6 +39,17 @@ _GEOD = Geod(ellps="WGS84")
 DEFAULT_IMAGE_SIZE = (1920, 1080)
 
 
+def _broadcast(*values: np.ndarray | float) -> tuple[np.ndarray, ...]:
+    """
+    Broadcast coordinate arguments to a common shape.
+
+    ``pyproj.Geod`` requires equal-length inputs, so a scalar origin paired with an
+    array of points raises rather than broadcasting. Every public function here goes
+    through this first so mixing scalars and arrays is always allowed.
+    """
+    return np.broadcast_arrays(*(np.asarray(value, dtype=float) for value in values))
+
+
 def metres_to_latlon(
     lat0: np.ndarray | float,
     lon0: np.ndarray | float,
@@ -53,12 +64,7 @@ def metres_to_latlon(
     the ellipsoid by ~0.1% at this latitude, which would silently bias every
     projected coordinate.
     """
-    lat0_a, lon0_a, east, north = np.broadcast_arrays(
-        np.asarray(lat0, dtype=float),
-        np.asarray(lon0, dtype=float),
-        np.asarray(east_m, dtype=float),
-        np.asarray(north_m, dtype=float),
-    )
+    lat0_a, lon0_a, east, north = _broadcast(lat0, lon0, east_m, north_m)
     azimuth = np.degrees(np.arctan2(east, north))
     distance = np.hypot(east, north)
     lon, lat, _ = _GEOD.fwd(lon0_a, lat0_a, azimuth, distance)
@@ -76,12 +82,8 @@ def latlon_to_metres(
 
     Inverse of :func:`metres_to_latlon`.
     """
-    azimuth, _, distance = _GEOD.inv(
-        np.asarray(lon0, dtype=float),
-        np.asarray(lat0, dtype=float),
-        np.asarray(lon, dtype=float),
-        np.asarray(lat, dtype=float),
-    )
+    lat0_a, lon0_a, lat_a, lon_a = _broadcast(lat0, lon0, lat, lon)
+    azimuth, _, distance = _GEOD.inv(lon0_a, lat0_a, lon_a, lat_a)
     radians = np.radians(azimuth)
     return np.asarray(distance) * np.sin(radians), np.asarray(distance) * np.cos(radians)
 
@@ -95,12 +97,8 @@ def haversine_m(
     """
     Ground distance in metres between coordinate pairs, on the WGS84 ellipsoid.
     """
-    _, _, dist = _GEOD.inv(
-        np.asarray(lon1, dtype=float),
-        np.asarray(lat1, dtype=float),
-        np.asarray(lon2, dtype=float),
-        np.asarray(lat2, dtype=float),
-    )
+    lat1_a, lon1_a, lat2_a, lon2_a = _broadcast(lat1, lon1, lat2, lon2)
+    _, _, dist = _GEOD.inv(lon1_a, lat1_a, lon2_a, lat2_a)
     return np.asarray(dist, dtype=float)
 
 
@@ -113,12 +111,8 @@ def bearing_deg(
     """
     Forward azimuth in degrees clockwise from true north, in [0, 360).
     """
-    az, _, _ = _GEOD.inv(
-        np.asarray(lon1, dtype=float),
-        np.asarray(lat1, dtype=float),
-        np.asarray(lon2, dtype=float),
-        np.asarray(lat2, dtype=float),
-    )
+    lat1_a, lon1_a, lat2_a, lon2_a = _broadcast(lat1, lon1, lat2, lon2)
+    az, _, _ = _GEOD.inv(lon1_a, lat1_a, lon2_a, lat2_a)
     return np.mod(np.asarray(az, dtype=float), 360.0)
 
 

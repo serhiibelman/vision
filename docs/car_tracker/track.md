@@ -61,6 +61,23 @@ never enter the loop, so a purely post-match check let a track coast across an
 arbitrarily long gap and then claim a distant detection — a wrong-identity join. A test
 covers this.
 
+## Known bug: the gate is shared, not per track
+
+```python
+gate = gate_slack_m
+for track in active:
+    gate = max(gate, max_speed_mps * dt + gate_slack_m)   # shared by everyone
+```
+
+One track coasting the full `max_coast_s = 1.0 s` yields `35 × 1.0 + 4 = 39 m`, and that
+radius then applies to **every** track in the frame. This is what permits 25–35 m
+single-frame jumps between different vehicles (~1000 m/s).
+
+A per-track fix exists on branch `appearance-experiment`; it was reverted along with the
+appearance experiment. Reapplying it removes the jumps but fragments real tracks, so it
+should be reapplied together with a decision on the fragmentation trade-off. See
+DECISIONS.md D7.
+
 ## Why Hungarian, not greedy
 
 Greedy nearest-neighbour swaps identities when two vehicles pass close to one another.

@@ -171,6 +171,88 @@ with no manual step and no risk of picking an unlucky landmark.
 
 ---
 
+## D7 — Parking-lot false movers: investigated, two fixes tried and reverted
+
+**Date:** 2026-08-18
+**Status:** documented limitation. Code is at `0c04272`; the attempts live on branch
+`appearance-experiment` if anyone wants to revisit them.
+
+**Trigger:** a manual count of the full video gave 56 moving cars against 88 reported.
+Most of the false ones were parked cars in lots, packed tightly together.
+
+### What the data showed (these measurements stand)
+
+- **45 of 88** "moving" tracks travel within 30° of the drone's own heading; **28** also
+  match its ground speed to within ±40%. A track that follows the drone is walking along a
+  row of parked cars as new ones enter the frame.
+- They **cluster in frames 4563–4979**, the final descent over dense parking.
+- Some contain **single-frame steps of 25–35 m** — roughly 1000 m/s.
+- Projection accuracy is *not* the cause: the static-point residual stays at 0.42 m median
+  even at 25–57°/s yaw rate, versus 0.28 m when calm.
+- Reported speeds are biased low: displacement ÷ duration over filtered speed has a median
+  ratio of 1.45, because the Kalman filter starts at rest and the median includes warm-up.
+
+### Root cause
+
+Cars in a parking lot sit at ~2.5 m pitch. Projection error is 0.3 m typically and 1.5 m
+during rapid yaw, plus ~0.5–1 m of centroid jitter. The gate cannot be smaller than our own
+error, so the neighbouring car is always reachable, and a parking row is collinear — a hop
+chain therefore has straightness ≈ 1 and growing displacement, indistinguishable from a
+real car by **position alone**.
+
+### Attempt 1 — fix the gates (a real bug, but not the cure)
+
+Two genuine defects were found and fixed:
+
+1. The gate was a **single scalar taken as the maximum over all tracks**, so one track
+   coasting the full `max_coast_s` handed *every* track a 39 m radius. This is what allowed
+   the 25–35 m jumps.
+2. Even per track, using the global `max_speed` gave a settled parked car a 37 m radius
+   after coasting.
+
+Also added: velocity seeded from the first two observations (removing the low-speed bias),
+and a `teleporting` verdict rejecting impossible single steps.
+
+**Result:** 35 m jumps eliminated, drone-following tracks down from 28 to 19 — but the
+headline count barely moved (88 → 86), because tighter gates **fragment real tracks**
+(`too_short` rejections rose from 38 to 504). One error traded for another.
+
+### Attempt 2 — appearance matching (made it worse)
+
+A median BGR colour per detection, with pairs beyond a distance threshold excluded from
+association. Reported movers fell 88 → 60, but **the parked chains largely survived while
+real moving cars were lost**.
+
+Cause: raw BGR measures illumination, not identity. A car driving from sun into shadow
+moves further in BGR than two adjacent parked cars do, so the gate rejected *correct*
+matches and fragmented real tracks, while the chains that survived were exactly the
+same-colour pairs colour can never separate.
+
+A chromaticity-based descriptor (BGR ÷ intensity, brightness down-weighted) fixes the
+shadow problem in isolation — same car through shadow scores 7–15, two differently
+coloured cars 170–180 — but it was never validated on the full video before the revert.
+
+### Also tried and rejected
+
+- **Progress consistency** (a hopper dwells then jumps; a real car progresses steadily):
+  stalled-window fraction 0.29 for suspects versus 0.13 for plausible tracks. Real
+  separation, but thresholding dropped 22 probably-real tracks to remove 11 suspects.
+- **Rejecting tracks that move at the drone's speed and heading**: identifies 19 likely
+  artifacts, but would also delete a real car driving along the road alongside the drone,
+  which is plausible on this footage.
+
+### Untried options
+
+1. **Bound rather than fix**: raise `min_displacement_m` from 15 m to ~40 m. A hop chain
+   rarely exceeds a lot's dimension; a real car on a road easily does. One line, immediately
+   measurable against the count of 56. Loses genuinely short trips.
+2. **Suppress tracks inside static clusters**: find regions of many mutually stationary
+   vehicles and apply a stricter test only there, instead of penalising everything.
+3. **Accept and report**: ship the map with the limitation documented and the rejected-track
+   layer available. This is where the code currently sits.
+
+---
+
 ## Open
 
 - Static-vs-moving filter thresholds — needs real tracks first.

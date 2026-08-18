@@ -114,12 +114,22 @@ All five movers had straightness 1.00. Speeds of 19–54 km/h are plausible for 
 street, and displacement ÷ duration independently cross-checks the filtered speed for
 four of the five.
 
-## Known caveat
+## Known caveat: 88 reported versus 56 actual
 
-One track (6 observations, 1.2 s) has displacement implying ~78 km/h while its filtered
-speed says 35 km/h. Those disagree, so it is either an association error joining two
-vehicles or a filter that had not converged. It passes the thresholds; short tracks
-deserve scepticism.
+The over-count comes from **dense parking lots**. Cars sit at ~2.5 m pitch while projection
+error reaches 1.5 m during rapid yaw, so the association gate cannot exclude the
+neighbouring vehicle. A parking row is collinear, so a hop chain has straightness ≈ 1 and
+growing displacement — indistinguishable from a real car by position alone.
+
+Evidence from the full run: 45 of 88 movers travel within 30° of the drone's own heading,
+28 also match its speed, and they cluster in frames 4563–4979 over dense parking.
+
+Two mitigations were tried and reverted (tighter gates fragmented real tracks; raw-BGR
+colour matching lost real movers because it measures illumination rather than identity).
+Measurements and untried options: DECISIONS.md D7.
+
+Separately, short tracks deserve scepticism: one 6-observation track has displacement
+implying ~78 km/h while its filtered speed says 35 km/h.
 
 ## Tests
 

@@ -66,7 +66,13 @@ while the map is re-iterated in seconds.
 - Negligible lens distortion near image centre (no calibration data available)
 - GPS accurate to a few metres → relative path shape better than absolute position
 
-## Known failure mode
+## Known failure modes
+
+**Dense parking lots.** The largest known inaccuracy: 88 moving cars reported against a
+manual count of 56. Cars sit at ~2.5 m pitch while projection error reaches 1.5 m during
+rapid yaw, so the association gate cannot exclude the neighbouring vehicle. A parking row is
+collinear, so a hop chain looks perfectly straight with growing displacement. Root cause,
+measurements and rejected fixes: DECISIONS.md D7.
 
 **Parallax.** At nadir, an object at height *h* displaces an extra ≈ `h/alt` when
 the drone translates — a 15 m building at 100 m alt shifts ~15% more than the

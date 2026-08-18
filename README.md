@@ -83,18 +83,31 @@ flight path, and satellite/street basemaps. Rejected tracks are kept visible on 
 
 ## Results
 
-Measured on a 10-second window (frames 1000–1300, every 3rd frame):
+Full video, every frame (GPU, ~12 min):
+
+```
+19,698 detections -> 286 tracks
+moving                88      <- manual count of the footage: 56
+rejected: stationary 149
+rejected: too_short   38
+rejected: too_slow    10
+displacement      15 .. 197 m
+median speed      32 km/h
+```
+
+A 10-second window (frames 1000–1300, every 3rd frame), useful as a quick CPU check:
 
 ```
 282 detections -> 15 tracks
-moving            5
-rejected: stationary 9, too_short 1
+moving             5
 displacement      20 .. 32 m
 median speed      34.6 km/h
 ```
 
 Calibration accuracy: a static ground point projects to within **0.29 m** from two
-different frames.
+different frames, measured over 35 frame pairs spread across the flight.
+
+The moving count over-reports — see [Known limitations](#known-limitations).
 
 ## Challenges encountered
 
@@ -172,6 +185,37 @@ Why each choice was made, including the ones that turned out wrong:
 | CPU (4 cores) | ~16 h — use `--stride` |
 
 Detection dominates; every other stage takes seconds.
+
+## Known limitations
+
+**Moving cars are over-reported: 88 against a manual count of 56.** All the extra ones
+trace to the same cause, and it is geometric rather than a tuning mistake.
+
+| Quantity | Value |
+|---|---|
+| Car pitch in a parking lot, side by side | **~2.5 m** |
+| Projection error | 0.3 m typical, **1.5 m during rapid yaw** |
+| Detector centroid jitter | ~0.5–1 m |
+
+The association gate cannot be tighter than our own measurement error, and that error is
+comparable to the spacing between adjacent parked cars. So a track can hop to the
+neighbouring vehicle, and because a parking row is collinear the resulting path is
+perfectly straight with steadily growing displacement — the exact signature of a real car.
+
+What the full-run data shows:
+
+- 45 of 88 "moving" tracks travel within 30° of the drone's own heading, and 28 of those
+  also match its speed to within ±40%. A track following the drone is a track walking
+  along a row of parked cars as new ones enter the frame.
+- They cluster in frames 4563–4979, the final descent over dense parking.
+- Some contain single-frame steps of 25–35 m, i.e. ~1000 m/s.
+
+Rejected tracks are kept in `outputs/track_features.csv` with the reason, and drawn as a
+hidden map layer, so every classification can be audited rather than trusted.
+
+Approaches tried and reverted, with measurements, are in
+[DECISIONS.md](DECISIONS.md) D7 — worth reading before attempting a fix, since the two
+obvious ones both cost more than they gained.
 
 ## Assumptions
 

@@ -372,3 +372,64 @@ class TestDriftCorrectionIsOptional:
         _, with_correction = moving_tracks(tracks, correct_drift=True)
         assert int(without["is_moving"].sum()) == 6
         assert int(with_correction["is_moving"].sum()) < 6
+
+
+class TestHeadingSpread:
+    """
+    A car on a road holds its direction or turns smoothly; a projection artifact wanders.
+
+    This catches what straightness cannot: straightness only compares endpoints to path
+    length, so a zigzag ending up far away still scores 1.0.
+    """
+
+    @staticmethod
+    def _spread(path):
+        from car_tracker.postprocess import heading_spread_deg
+
+        return heading_spread_deg(path[:, 0], path[:, 1])
+
+    def test_straight_path_has_near_zero_spread(self):
+        assert self._spread(driving(speed=12.0, n=60)) < 5.0
+
+    @staticmethod
+    def _sharp_corner(n=45, leg=40.0):
+        """
+        An instant right-angle turn. No car does this — turning takes time and traces an
+        arc — but straightness still scores 0.71, so only the heading test catches it.
+        """
+        first = np.stack([np.linspace(0, leg, n), np.zeros(n)], axis=1)
+        second = np.stack([np.full(n, leg), np.linspace(0, leg, n)], axis=1)
+        return np.vstack([first, second])
+
+    def test_zigzag_has_large_spread(self):
+        path = driving(speed=12.0, n=60)
+        path[:, 1] += np.tile([0.0, 6.0], 30)      # alternate side to side
+        assert self._spread(path) > 40.0
+
+    def test_sharp_corner_passes_straightness_but_fails_heading(self):
+        """
+        The exact gap the heading test closes.
+        """
+        features = track_features(build({1: self._sharp_corner()}))
+        assert features["straightness"].iloc[0] > 0.6      # straightness is fooled
+        assert features["heading_spread_deg"].iloc[0] > 40.0
+        assert classify(features)["verdict"].iloc[0] == "erratic"
+
+    def test_a_gentle_turn_is_allowed(self):
+        """
+        A real car turning must not be rejected, so the limit permits ~140 deg of turning.
+        """
+        n, radius = 90, 40.0
+        angle = np.linspace(0, np.pi / 2, n)       # a 90 degree turn
+        path = np.stack([radius * np.sin(angle), radius * (1 - np.cos(angle))], axis=1)
+        features = classify(track_features(build({1: path})))
+        assert features["heading_spread_deg"].iloc[0] < 40.0
+        assert features["is_moving"].all()
+
+    def test_too_few_moving_steps_is_not_penalised(self):
+        assert self._spread(parked(jitter=0.0, n=30)) == 0.0
+
+    def test_threshold_is_configurable(self):
+        features = track_features(build({1: self._sharp_corner()}))
+        lenient = classify(features, MovingCriteria(max_heading_spread_deg=180.0))
+        assert lenient["is_moving"].all()

@@ -64,6 +64,21 @@ MIN_OBSERVATIONS = 5
 # Above this, a "vehicle" is an association error rather than a car.
 MAX_PLAUSIBLE_SPEED_MPS = 45.0
 
+# Circular spread of the per-step heading, in degrees. A vehicle on a road holds its
+# direction or turns smoothly; a projection artifact wanders. Measured on real tracks: a
+# straight run scores under 10 deg, a 90 deg turn about 26, a U-turn about 52, while
+# erratic false movers reach 60-108. The limit therefore permits ~140 deg of genuine
+# turning and still rejects paths that visibly cannot be driven.
+#
+# This catches what straightness misses: straightness only compares endpoints to path
+# length, so a zigzag ending up far away still scores 1.0.
+MAX_HEADING_SPREAD_DEG = 40.0
+
+# Steps shorter than this carry no reliable direction, so they are excluded from the
+# heading statistic rather than contributing noise.
+MIN_STEP_FOR_HEADING_M = 0.05
+MIN_STEPS_FOR_HEADING = 5
+
 # Window for smoothing positions, in observations. Odd so it is symmetric.
 SMOOTHING_WINDOW = 5
 
@@ -80,6 +95,7 @@ class MovingCriteria:
     min_duration_s: float = MIN_DURATION_S
     min_observations: int = MIN_OBSERVATIONS
     max_speed_mps: float = MAX_PLAUSIBLE_SPEED_MPS
+    max_heading_spread_deg: float = MAX_HEADING_SPREAD_DEG
 
 
 def estimate_gps_drift(tracks: pd.DataFrame) -> pd.DataFrame:
@@ -170,6 +186,28 @@ def smooth_positions(
     return result
 
 
+def heading_spread_deg(east: np.ndarray, north: np.ndarray) -> float:
+    """
+    Circular standard deviation of the per-step direction of travel, in degrees.
+
+    Zero means every step pointed the same way. Large values mean the path doubles back on
+    itself, which a car on a road does not do.
+
+    Returns:
+        0.0 when there are too few moving steps to judge, so short or stationary tracks
+        are not penalised by this test.
+    """
+    de, dn = np.diff(east), np.diff(north)
+    steps = np.hypot(de, dn)
+    usable = steps > MIN_STEP_FOR_HEADING_M
+    if usable.sum() < MIN_STEPS_FOR_HEADING:
+        return 0.0
+
+    angles = np.arctan2(de[usable], dn[usable])
+    resultant = np.abs(np.mean(np.exp(1j * angles)))
+    return float(np.degrees(np.sqrt(max(-2.0 * np.log(max(resultant, 1e-9)), 0.0))))
+
+
 def track_features(
     tracks: pd.DataFrame, east_col: str = "east_m", north_col: str = "north_m"
 ) -> pd.DataFrame:
@@ -182,7 +220,8 @@ def track_features(
     """
     columns = [
         "track_id", "observations", "duration_s", "displacement_m", "path_length_m",
-        "straightness", "average_speed_mps", "median_speed_mps", "max_speed_mps", "mean_conf",
+        "straightness", "heading_spread_deg", "average_speed_mps", "median_speed_mps",
+        "max_speed_mps", "mean_conf",
         "start_lat", "start_lon", "end_lat", "end_lon",
     ]
     if tracks.empty:
@@ -204,6 +243,7 @@ def track_features(
                 # A degenerate zero-length path is stationary by definition, not
                 # perfectly straight.
                 "straightness": float(displacement / path_length) if path_length > 0 else 0.0,
+                "heading_spread_deg": heading_spread_deg(east, north),
                 # Ground truth for "did this thing move": no filter involved.
                 "average_speed_mps": (
                     float(displacement / duration) if (duration := float(
@@ -245,16 +285,19 @@ def classify(
     implausible = result["max_speed_mps"] > criteria.max_speed_mps
     still = result["displacement_m"] < criteria.min_displacement_m
     wandering = result["straightness"] < criteria.min_straightness
+    erratic = result.get(
+        "heading_spread_deg", pd.Series(0.0, index=result.index)
+    ) > criteria.max_heading_spread_deg
     slow = result["average_speed_mps"] < criteria.min_average_speed_mps
 
-    result["is_moving"] = ~(too_short | implausible | still | wandering | slow)
+    result["is_moving"] = ~(too_short | implausible | still | wandering | erratic | slow)
     # Displacement-based tests come first because they are the most robust signal.
     # Speed can spike from a single mis-placed detection, so a track that plainly went
     # nowhere should read "stationary" rather than "implausible_speed". A genuine
     # association error has large displacement and falls through to the speed test.
     result["verdict"] = np.select(
-        [too_short, still, wandering, slow, implausible],
-        ["too_short", "stationary", "wandering", "too_slow", "implausible_speed"],
+        [too_short, still, wandering, erratic, slow, implausible],
+        ["too_short", "stationary", "wandering", "erratic", "too_slow", "implausible_speed"],
         default="moving",
     )
     return result
@@ -359,7 +402,10 @@ def report(features: pd.DataFrame) -> str:
         f"tracks            {len(features)}",
         f"moving            {int(counts.get('moving', 0))}",
     ]
-    for verdict in ("stationary", "wandering", "too_slow", "too_short", "implausible_speed"):
+    rejections = (
+        "stationary", "wandering", "erratic", "too_slow", "too_short", "implausible_speed",
+    )
+    for verdict in rejections:
         if verdict in counts:
             lines.append(f"rejected: {verdict:<8} {int(counts[verdict])}")
 

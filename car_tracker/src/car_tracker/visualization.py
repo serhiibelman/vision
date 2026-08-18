@@ -89,6 +89,143 @@ def add_flight_path(fmap: folium.Map, telemetry: pd.DataFrame, step: int = 10) -
     group.add_to(fmap)
 
 
+# Distinct hues for track polylines, cycled. Chosen to stay legible against both the
+# satellite imagery and the street basemap.
+TRACK_COLOURS = (
+    "#00e5ff", "#ffea00", "#76ff03", "#ff4081",
+    "#b388ff", "#ff9100", "#18ffff", "#f4ff81",
+)
+
+
+def add_car_tracks(
+    fmap: folium.Map,
+    tracks: pd.DataFrame,
+    features: pd.DataFrame | None = None,
+    name: str = "Moving cars",
+    show: bool = True,
+) -> None:
+    """
+    Draw one polyline per car track, with start and end markers.
+
+    Args:
+        fmap: map to draw on.
+        tracks: observation rows with ``track_id``, ``lat``, ``lon``, ``t_sec``.
+        features: optional per-track summary from :mod:`car_tracker.postprocess`,
+            used to label each path with its speed and distance.
+        name: layer name in the control.
+        show: whether the layer starts visible.
+    """
+    group = folium.FeatureGroup(name=name, show=show)
+    summary = features.set_index("track_id") if features is not None else None
+
+    for index, (track_id, rows) in enumerate(tracks.sort_values("t_sec").groupby("track_id")):
+        points = list(zip(rows["lat"], rows["lon"], strict=True))
+        if len(points) < 2:
+            continue
+        colour = TRACK_COLOURS[index % len(TRACK_COLOURS)]
+
+        label = f"car {int(track_id)}"
+        if summary is not None and track_id in summary.index:
+            row = summary.loc[track_id]
+            label = (
+                f"car {int(track_id)} · {row['median_speed_mps'] * 3.6:.0f} km/h · "
+                f"{row['displacement_m']:.0f} m · {row['duration_s']:.1f} s"
+            )
+
+        folium.PolyLine(
+            points, color=colour, weight=4, opacity=0.95, tooltip=label
+        ).add_to(group)
+        # Direction of travel is otherwise ambiguous on a bare line.
+        folium.CircleMarker(
+            points[0], radius=4, color=colour, fill=True, fill_opacity=1.0,
+            tooltip=f"{label} — start",
+        ).add_to(group)
+        folium.RegularPolygonMarker(
+            points[-1], number_of_sides=3, radius=7, rotation=0,
+            color=colour, fill_color=colour, fill_opacity=1.0,
+            tooltip=f"{label} — end",
+        ).add_to(group)
+
+    group.add_to(fmap)
+
+
+def add_rejected_tracks(
+    fmap: folium.Map, tracks: pd.DataFrame, features: pd.DataFrame, name: str = "Rejected (parked)"
+) -> None:
+    """
+    Draw tracks that failed the moving test, hidden by default.
+
+    Kept on the map so a rejection can be inspected rather than taken on trust: if a
+    genuine car was filtered out, this layer is where it shows up.
+    """
+    rejected_ids = set(features.loc[~features["is_moving"], "track_id"])
+    if not rejected_ids:
+        return
+
+    group = folium.FeatureGroup(name=name, show=False)
+    summary = features.set_index("track_id")
+
+    for track_id, rows in tracks[tracks["track_id"].isin(rejected_ids)].groupby("track_id"):
+        points = list(zip(rows["lat"], rows["lon"], strict=True))
+        if len(points) < 2:
+            continue
+        verdict = summary.loc[track_id, "verdict"]
+        folium.PolyLine(
+            points, color="#9e9e9e", weight=2, opacity=0.7, dash_array="4",
+            tooltip=f"car {int(track_id)} — rejected: {verdict}",
+        ).add_to(group)
+
+    group.add_to(fmap)
+
+
+def render_tracks(
+    tracks: pd.DataFrame,
+    features: pd.DataFrame,
+    out_path: str | Path,
+    telemetry: pd.DataFrame | None = None,
+    all_tracks: pd.DataFrame | None = None,
+) -> Path:
+    """
+    Write the deliverable map: moving car paths, optionally over the flight path.
+
+    Args:
+        tracks: observations of moving cars only.
+        features: per-track summary with verdicts.
+        out_path: destination HTML file.
+        telemetry: if given, the drone's flight path is drawn as context.
+        all_tracks: if given, rejected tracks are added as a hidden layer.
+
+    Returns:
+        The path written.
+    """
+    if tracks.empty and telemetry is None:
+        raise ValueError("nothing to draw: no tracks and no telemetry")
+
+    if tracks.empty:
+        lat = telemetry["lat"].to_numpy()
+        lon = telemetry["lon"].to_numpy()
+    else:
+        lat = tracks["lat"].to_numpy()
+        lon = tracks["lon"].to_numpy()
+
+    fmap = base_map(lat, lon, zoom=17)
+    if telemetry is not None:
+        add_flight_path(fmap, telemetry, step=10)
+    if all_tracks is not None and not all_tracks.empty:
+        add_rejected_tracks(fmap, all_tracks, features)
+    if not tracks.empty:
+        add_car_tracks(fmap, tracks, features)
+
+    pad = 0.0004  # keep short paths from filling the whole viewport
+    fmap.fit_bounds([[lat.min() - pad, lon.min() - pad], [lat.max() + pad, lon.max() + pad]])
+    folium.LayerControl(collapsed=False).add_to(fmap)
+
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fmap.save(str(out))
+    return out
+
+
 def render_flight_path(
     telemetry: pd.DataFrame, out_path: str | Path, step: int = 10
 ) -> Path:

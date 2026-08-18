@@ -105,3 +105,93 @@ class TestAddFlightPath:
         before = len(fmap._children)
         add_flight_path(fmap, telemetry)
         assert len(fmap._children) > before
+
+
+class TestCarTracks:
+    @pytest.fixture
+    def tracks(self):
+        """
+        Two cars driving east, one fast one slow.
+        """
+        rows = []
+        for track_id, speed in ((1, 1e-4), (2, 4e-5)):
+            for i in range(6):
+                rows.append(
+                    {
+                        "track_id": track_id,
+                        "frame": i + 1,
+                        "t_sec": i / 30.0,
+                        "lat": 48.2670 + track_id * 1e-4,
+                        "lon": 25.9145 + i * speed,
+                        "speed_mps": 12.0 if track_id == 1 else 5.0,
+                        "conf": 0.8,
+                    }
+                )
+        return pd.DataFrame(rows)
+
+    @pytest.fixture
+    def features(self):
+        return pd.DataFrame(
+            {
+                "track_id": [1, 2, 3],
+                "displacement_m": [40.0, 16.0, 1.0],
+                "duration_s": [0.17, 0.17, 0.5],
+                "median_speed_mps": [12.0, 5.0, 0.1],
+                "is_moving": [True, True, False],
+                "verdict": ["moving", "moving", "stationary"],
+            }
+        )
+
+    def test_draws_a_polyline_per_track(self, tracks, features):
+        from car_tracker.visualization import add_car_tracks, base_map
+
+        fmap = base_map(tracks["lat"].to_numpy(), tracks["lon"].to_numpy())
+        before = len(fmap._children)
+        add_car_tracks(fmap, tracks, features)
+        assert len(fmap._children) > before
+
+    def test_renders_html_with_speed_labels(self, tracks, features, tmp_path):
+        from car_tracker.visualization import render_tracks
+
+        html = render_tracks(tracks, features, tmp_path / "tracks.html").read_text()
+        assert "km/h" in html
+        assert "car 1" in html
+
+    def test_single_point_track_is_skipped(self, features, tmp_path):
+        from car_tracker.visualization import render_tracks
+
+        one = pd.DataFrame(
+            {"track_id": [1], "t_sec": [0.0], "lat": [48.267], "lon": [25.9145],
+             "speed_mps": [0.0]}
+        )
+        assert render_tracks(one, features, tmp_path / "one.html").exists()
+
+    def test_rejected_layer_is_added_when_requested(self, tracks, features, tmp_path):
+        from car_tracker.visualization import render_tracks
+
+        rejected = tracks.assign(track_id=3)
+        html = render_tracks(
+            tracks, features, tmp_path / "r.html", all_tracks=pd.concat([tracks, rejected])
+        ).read_text()
+        assert "rejected" in html.lower()
+
+    def test_flight_path_included_when_telemetry_given(self, tracks, features, telemetry, tmp_path):
+        from car_tracker.visualization import render_tracks
+
+        html = render_tracks(
+            tracks, features, tmp_path / "f.html", telemetry=telemetry
+        ).read_text()
+        assert "Drone flight path" in html
+
+    def test_empty_tracks_with_telemetry_still_renders(self, features, telemetry, tmp_path):
+        from car_tracker.visualization import render_tracks
+
+        empty = pd.DataFrame(columns=["track_id", "t_sec", "lat", "lon", "speed_mps"])
+        assert render_tracks(empty, features, tmp_path / "e.html", telemetry=telemetry).exists()
+
+    def test_nothing_to_draw_raises(self, features, tmp_path):
+        from car_tracker.visualization import render_tracks
+
+        empty = pd.DataFrame(columns=["track_id", "t_sec", "lat", "lon", "speed_mps"])
+        with pytest.raises(ValueError, match="nothing to draw"):
+            render_tracks(empty, features, tmp_path / "x.html")

@@ -67,12 +67,20 @@ MAX_PLAUSIBLE_SPEED_MPS = 45.0
 # Circular spread of the per-step heading, in degrees. A vehicle on a road holds its
 # direction or turns smoothly; a projection artifact wanders. Measured on real tracks: a
 # straight run scores under 10 deg, a 90 deg turn about 26, a U-turn about 52, while
-# erratic false movers reach 60-108. The limit therefore permits ~140 deg of genuine
-# turning and still rejects paths that visibly cannot be driven.
+# erratic false movers reach 60-108. The limit sits at 50 rather than lower because real
+# vehicles do take sharp junction turns and U-turns (~52 deg), and rejecting those cost
+# roughly 8 genuine cars on this footage.
 #
 # This catches what straightness misses: straightness only compares endpoints to path
 # length, so a zigzag ending up far away still scores 1.0.
-MAX_HEADING_SPREAD_DEG = 40.0
+MAX_HEADING_SPREAD_DEG = 50.0
+
+# A shorter trip is still credible when the direction is highly consistent: a car entering
+# and leaving the frame may only be observed for 10-14 m, which the main displacement floor
+# would discard. Requiring a tight heading spread keeps that concession narrow — noise and
+# jitter never travel coherently.
+SHORT_TRIP_DISPLACEMENT_M = 10.0
+SHORT_TRIP_SPREAD_DEG = 25.0
 
 # Steps shorter than this carry no reliable direction, so they are excluded from the
 # heading statistic rather than contributing noise.
@@ -96,6 +104,8 @@ class MovingCriteria:
     min_observations: int = MIN_OBSERVATIONS
     max_speed_mps: float = MAX_PLAUSIBLE_SPEED_MPS
     max_heading_spread_deg: float = MAX_HEADING_SPREAD_DEG
+    short_trip_displacement_m: float = SHORT_TRIP_DISPLACEMENT_M
+    short_trip_spread_deg: float = SHORT_TRIP_SPREAD_DEG
 
 
 def estimate_gps_drift(tracks: pd.DataFrame) -> pd.DataFrame:
@@ -205,7 +215,11 @@ def heading_spread_deg(east: np.ndarray, north: np.ndarray) -> float:
 
     angles = np.arctan2(de[usable], dn[usable])
     resultant = np.abs(np.mean(np.exp(1j * angles)))
-    return float(np.degrees(np.sqrt(max(-2.0 * np.log(max(resultant, 1e-9)), 0.0))))
+    spread = np.degrees(np.sqrt(max(-2.0 * np.log(max(resultant, 1e-9)), 0.0)))
+    # Circular standard deviation is unbounded as the resultant approaches zero, which
+    # makes the threshold uninterpretable. Past 180 degrees the directions are simply
+    # uncorrelated, so cap there and keep the parameter readable as 0-180.
+    return float(min(spread, 180.0))
 
 
 def track_features(
@@ -283,11 +297,14 @@ def classify(
         result["duration_s"] < criteria.min_duration_s
     )
     implausible = result["max_speed_mps"] > criteria.max_speed_mps
-    still = result["displacement_m"] < criteria.min_displacement_m
+    spread = result.get("heading_spread_deg", pd.Series(0.0, index=result.index))
+    # A short trip counts if it was travelled in a consistent direction.
+    coherent_short_trip = (
+        result["displacement_m"] >= criteria.short_trip_displacement_m
+    ) & (spread <= criteria.short_trip_spread_deg)
+    still = (result["displacement_m"] < criteria.min_displacement_m) & ~coherent_short_trip
     wandering = result["straightness"] < criteria.min_straightness
-    erratic = result.get(
-        "heading_spread_deg", pd.Series(0.0, index=result.index)
-    ) > criteria.max_heading_spread_deg
+    erratic = spread > criteria.max_heading_spread_deg
     slow = result["average_speed_mps"] < criteria.min_average_speed_mps
 
     result["is_moving"] = ~(too_short | implausible | still | wandering | erratic | slow)

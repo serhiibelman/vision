@@ -392,10 +392,22 @@ class TestHeadingSpread:
         assert self._spread(driving(speed=12.0, n=60)) < 5.0
 
     @staticmethod
+    def _stuttering(pairs=45, forward=2.0, back=0.5):
+        """
+        Forward, then back, repeatedly: net progress but the direction keeps reversing.
+
+        This is the shape real false movers take, and it defeats straightness — 0.6 here,
+        comfortably above the 0.4 floor — because straightness only compares endpoints to
+        path length and cannot see the reversals.
+        """
+        steps = np.tile([forward, -back], pairs)
+        east = np.concatenate([[0.0], np.cumsum(steps)])
+        return np.stack([east, np.zeros(len(east))], axis=1)
+
+    @staticmethod
     def _sharp_corner(n=45, leg=40.0):
         """
-        An instant right-angle turn. No car does this — turning takes time and traces an
-        arc — but straightness still scores 0.71, so only the heading test catches it.
+        An instant right-angle turn, which a real car at a junction approximates.
         """
         first = np.stack([np.linspace(0, leg, n), np.zeros(n)], axis=1)
         second = np.stack([np.full(n, leg), np.linspace(0, leg, n)], axis=1)
@@ -406,14 +418,22 @@ class TestHeadingSpread:
         path[:, 1] += np.tile([0.0, 6.0], 30)      # alternate side to side
         assert self._spread(path) > 40.0
 
-    def test_sharp_corner_passes_straightness_but_fails_heading(self):
+    def test_stuttering_passes_straightness_but_fails_heading(self):
         """
         The exact gap the heading test closes.
         """
-        features = track_features(build({1: self._sharp_corner()}))
-        assert features["straightness"].iloc[0] > 0.6      # straightness is fooled
-        assert features["heading_spread_deg"].iloc[0] > 40.0
+        features = track_features(build({1: self._stuttering()}))
+        assert features["straightness"].iloc[0] > 0.4      # straightness is fooled
+        assert features["heading_spread_deg"].iloc[0] > 50.0
         assert classify(features)["verdict"].iloc[0] == "erratic"
+
+    def test_a_junction_turn_is_allowed(self):
+        """
+        A car turning sharply at a junction must survive; the limit sits above that.
+        """
+        features = classify(track_features(build({1: self._sharp_corner()})))
+        assert features["heading_spread_deg"].iloc[0] < 50.0
+        assert features["is_moving"].all()
 
     def test_a_gentle_turn_is_allowed(self):
         """
@@ -430,6 +450,42 @@ class TestHeadingSpread:
         assert self._spread(parked(jitter=0.0, n=30)) == 0.0
 
     def test_threshold_is_configurable(self):
-        features = track_features(build({1: self._sharp_corner()}))
-        lenient = classify(features, MovingCriteria(max_heading_spread_deg=180.0))
-        assert lenient["is_moving"].all()
+        features = track_features(build({1: self._stuttering()}))
+        assert classify(features)["verdict"].iloc[0] == "erratic"
+        # 180 is the cap, so the limit must sit above it to admit uncorrelated headings.
+        # The verdict is what changes; this path also trips the speed test independently.
+        lenient = classify(features, MovingCriteria(max_heading_spread_deg=180.1))
+        assert lenient["verdict"].iloc[0] != "erratic"
+
+
+class TestCoherentShortTrip:
+    """
+    A car observed briefly still counts, provided it travelled in a consistent direction.
+
+    Without this, a vehicle entering and leaving the frame within 10-14 m was discarded as
+    stationary, which is where a share of the missing real cars went.
+    """
+
+    @staticmethod
+    def _short_run(distance=12.0, n=40):
+        return np.stack([np.linspace(0, distance, n), np.zeros(n)], axis=1)
+
+    def test_short_but_straight_run_counts(self):
+        features = classify(track_features(build({1: self._short_run()})))
+        assert features["displacement_m"].iloc[0] < 15.0    # under the main floor
+        assert features["is_moving"].all()
+
+    def test_short_and_wandering_is_still_rejected(self):
+        path = self._short_run()
+        path[:, 1] += np.tile([0.0, 1.5], 20)              # same distance, jittery
+        features = classify(track_features(build({1: path})))
+        assert not features["is_moving"].any()
+
+    def test_very_short_run_is_rejected(self):
+        features = classify(track_features(build({1: self._short_run(distance=6.0)})))
+        assert not features["is_moving"].any()
+
+    def test_concession_is_configurable(self):
+        features = track_features(build({1: self._short_run()}))
+        strict = classify(features, MovingCriteria(short_trip_displacement_m=14.0))
+        assert not strict["is_moving"].any()

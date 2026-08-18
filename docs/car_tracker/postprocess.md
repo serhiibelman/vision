@@ -15,14 +15,26 @@ detections answers the wrong question.
 
 Geometric, not visual. Once tracks are geo-referenced:
 
-| Signal | Moving car | Parked car |
+| Signal | Moving car | Parked car / artifact |
 |---|---|---|
-| `displacement_m` (start → end) | 20–32 m observed | ~0 |
-| `straightness` (displacement ÷ path length) | ~1.0 | <0.2 |
-| `median_speed_mps` | 5–15 | ~0 |
+| `displacement_m` (start → end) | 11–190 m observed | ~0 |
+| `straightness` (displacement ÷ path length) | ~0.95 | <0.2 |
+| `heading_spread_deg` (direction consistency) | <10° straight, ~26° turning | 60–108° |
+| `average_speed_mps` (displacement ÷ duration) | 5–15 | ~0 |
 
-**Straightness** is the strongest signal. A parked car accumulates path length from
-noise while going nowhere, so the ratio collapses; a car on a road approaches 1.
+**Two signals do the work, and they catch different things.**
+
+*Straightness* rejects a track that accumulates path length by jittering in place.
+
+*Heading spread* rejects a track that reverses direction repeatedly but still finishes far
+away — straightness scores such a path **1.0**, because it only compares endpoints to path
+length. One real track scored straightness 1.0 with a heading spread of 80°: that is the
+"pointing in impossible directions" failure visible on the map.
+
+**Average speed is displacement ÷ duration, not the Kalman filter's speed.** The filter
+starts from rest, so its median understates by 1.7× typically and up to **49×** on short
+tracks — enough to reject real cars travelling 60 km/h as "too slow". Ten such cars were
+being discarded before this changed.
 
 ## API
 
@@ -46,19 +58,23 @@ to_geojson(moving, features, "results/tracks.geojson")
 | `report(features)` | counts kept and rejected, by reason |
 | `MovingCriteria` | thresholds, frozen dataclass |
 
-## GPS drift correction
+## GPS drift correction — implemented but OFF by default
 
-Drift in the drone's own fix is **common-mode**: it displaces every projected object
-together, so a whole street of parked cars appears to drift in formation and can cross
-the moving threshold.
+The idea is sound: drift in the drone's own fix is common-mode, displacing every projected
+object together, so a street of parked cars can appear to drift in formation.
 
-The median step across all tracks present in a frame estimates it. Median rather than
-mean, so the handful of genuinely moving vehicles cannot bias the estimate — which holds
-as long as most tracks are parked, and here they are.
+The estimator is not. It sums a per-frame median, and the small bias in that median
+integrates without bound: on this footage it reports **117 m east and −108 m north** where
+the truth is a few metres. Worse, when several vehicles move together the median *becomes*
+the traffic's motion, so subtracting it erases the real movers — in a synthetic test with
+six moving and six parked cars it removed all six real ones.
 
-Corrected values go in new columns (`east_corrected_m`, `north_corrected_m`) so the
-correction can be inspected rather than trusted. A test asserts it cancels four parked
-cars drifting in formation **and** leaves a genuine mover intact.
+Enable with `moving_tracks(tracks, correct_drift=True)` only with evidence of real drift,
+and check `estimate_gps_drift()` output before trusting it.
+
+It also had no effect for a long time: `smooth_positions` always read the raw columns, so
+the correction was computed and silently discarded. That is fixed — the flag now does what
+it says.
 
 ## Smoothing
 
@@ -70,8 +86,10 @@ rather than blended into the path.
 | Name | Default | Rejects |
 |---|---|---|
 | `min_displacement_m` | 15.0 | parked cars, above GPS noise |
+| `short_trip_displacement_m` / `short_trip_spread_deg` | 10.0 / 25° | concession: a briefly-seen car counts at 10 m **if** its direction is consistent |
+| `max_heading_spread_deg` | 50° | paths that reverse and wander; 50 permits a U-turn (~52°) and junction turns (~48°) |
 | `min_straightness` | 0.4 | tracks that accumulate distance by jittering |
-| `min_median_speed_mps` | 1.5 | stationary vehicles |
+| `min_average_speed_mps` | 5.0 | stationary vehicles, and rotation artifacts that creep at ~14 km/h |
 | `min_duration_s` / `min_observations` | 0.5 / 5 | tracks too brief to judge |
 | `max_speed_mps` | 45.0 | association errors masquerading as cars |
 
@@ -81,7 +99,7 @@ rather than blended into the path.
 with rather than merely dropped:
 
 ```
-moving · stationary · wandering · too_slow · too_short · implausible_speed
+moving · too_short · stationary · wandering · erratic · too_slow · implausible_speed
 ```
 
 Displacement-based tests are checked before speed-based ones. Speed can spike from one
@@ -97,24 +115,28 @@ shows up.
 
 ## Measured on video2
 
-Frames 1000–1300, every 3rd frame:
+Full video, every frame:
 
 ```
-tracks            15
-moving            5
-rejected: stationary 9
-rejected: too_short 1
+tracks                313
+moving                 76      <- manual count of the footage: 56
+rejected: stationary  124
+rejected: too_short    76
+rejected: erratic      28
+rejected: implausible_speed 5
+rejected: too_slow      3
+rejected: wandering     1
 
-displacement      20 .. 32 m
-median speed      34.6 km/h
-duration          1.2 .. 4.0 s
+displacement       11 .. 190 m
+average speed      46 km/h
+duration          0.5 .. 14.2 s
 ```
 
-All five movers had straightness 1.00. Speeds of 19–54 km/h are plausible for the
-street, and displacement ÷ duration independently cross-checks the filtered speed for
-four of the five.
+## Known caveats: 76 reported versus 56 actual
 
-## Known caveat: 88 reported versus 56 actual
+Two independent errors, pulling in opposite directions.
+
+**Over-reporting — parking lots.**
 
 The over-count comes from **dense parking lots**. Cars sit at ~2.5 m pitch while projection
 error reaches 1.5 m during rapid yaw, so the association gate cannot exclude the
@@ -128,12 +150,25 @@ Two mitigations were tried and reverted (tighter gates fragmented real tracks; r
 colour matching lost real movers because it measures illumination rather than identity).
 Measurements and untried options: DECISIONS.md D7.
 
-Separately, short tracks deserve scepticism: one 6-observation track has displacement
-implying ~78 km/h while its filtered speed says 35 km/h.
+**Under-reporting — the detection blind band.** Over frames ~3163–4142 (70–85 m altitude)
+the detector averages 0.8 detections per frame against 4.4–5.8 elsewhere, verified by hand
+on frame 3620: nine visible vehicles, one detected. Nothing this module can do — the cars
+never reach it. See [detect.md](detect.md) and DECISIONS.md D8.
+
+So the count is not simply 20 too high: it is inflated by parking-lot hops and deflated by
+missing detections, and the two do not cancel in any principled way. Judging a threshold
+change by the headline number alone is therefore misleading — that mistake cost several
+iterations.
 
 ## Tests
 
-`car_tracker/tests/test_postprocess.py` — 34 tests. Straightness on driving versus
-parked paths, a divide-by-zero guard so a perfectly still car is not "perfectly
-straight", drift correction in both directions, median smoothing rejecting an outlier,
-GeoJSON structure and lon/lat ordering, and configurable thresholds.
+`car_tracker/tests/test_postprocess.py` — 53 tests. Straightness on driving versus parked
+paths, a divide-by-zero guard so a perfectly still car is not "perfectly straight", drift
+correction in both directions **and** that enabling it reaches the measurement at all,
+median smoothing rejecting an outlier, GeoJSON structure and lon/lat ordering, and
+configurable thresholds.
+
+Two cases pin the heading test specifically: a **stuttering** path (forward-back-forward,
+straightness 0.6 so that test is fooled, spread 180° so heading catches it) must be
+rejected, and a **sharp junction turn** (spread 48°) must survive. The short-trip concession
+has matching pairs: 12 m travelled straight counts, 12 m travelled jittery does not.

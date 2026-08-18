@@ -83,6 +83,39 @@ runtime     11.6 s/frame on 4 CPU cores
 So develop and test here, run the full pass on the GPU box. `--stride` exists for
 partial CPU runs.
 
+## Measured limitation: a blind altitude band
+
+Detection density across the flight is **not** uniform, and not a function of object size:
+
+| Altitude band | Frames | Detections per frame |
+|---|---|---|
+| ≤70 m | ~4200–4979 | 5.8 |
+| **70–85 m** | **~3163–4142** | **0.8 (median 0)** |
+| 85–105 m | 1–3160 | 4.4 |
+
+The dip is non-monotonic — recall collapses in one band and recovers on both sides — so it
+cannot be explained by cars being too small or too large. Camera settings are identical
+across the bands (ISO 100, ~1/1100 s), and the drone passes over the *same* streets on the
+way out and back, so the scene content is comparable.
+
+Verified by hand on frame 3620 (77 m): at least **nine** clearly visible vehicles, one
+detected. Lowering confidence does not recover them —
+
+| conf | 0.25 | 0.15 | 0.10 | 0.05 |
+|---|---|---|---|---|
+| detections on frame 3620 | 1 | 1 | 1 | 1 |
+
+— so the cars are not scoring low, they are not being proposed at all. Isolated 640 px
+crops around individual missed cars, even upscaled 2×, also return nothing.
+
+**Consequence:** moving-car recall is materially worse over roughly frames 3163–4142.
+Judged from the detection funnel alone this is invisible — 99% of detections survive
+tracking — because the loss happens before anything is detected.
+
+COCO-trained weights cover much of this band (frame 3620: 11 detections versus 1) but miss
+what DOTA finds elsewhere and box buildings. Running both was implemented, measured and
+then reverted; see DECISIONS.md D8.
+
 ## Do not use `w_px` / `h_px` as vehicle length
 
 Box dimensions are unreliable and inconsistent across altitude: at ~102 m they imply
@@ -92,7 +125,7 @@ half "large vehicle") is likewise not trustworthy at ~57 px. Scale comes from
 
 ## Tests
 
-`car_tracker/tests/test_detect.py` — 34 tests with the model stubbed, so no weights and
+`car_tracker/tests/test_detect.py` — 39 tests with the model stubbed, so no weights and
 no GPU are needed. Covers full-frame tile coverage, clamping, tile→frame coordinate
 shift, NMS de-duplication of a car straddling a seam, angle conversion, incremental
 CSV writing, and one test asserting the output drops straight into

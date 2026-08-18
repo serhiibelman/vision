@@ -30,6 +30,7 @@ print(summarise(tracks))
 | `to_local_metres(detections, origin)` | lat/lon → ENU metres, fixed origin |
 | `summarise(tracks)` | per-track duration, displacement, path length, speeds |
 | `KalmanTrack` | constant-velocity filter for one vehicle |
+| `KalmanTrack.seed_velocity(...)` | initialise velocity from the first two observations |
 | `Track` | one track under construction, with lifecycle counters |
 
 ## Output
@@ -85,6 +86,18 @@ Hungarian assignment is globally optimal for the frame. Out-of-gate pairs are ma
 expensive rather than impossible so the solver always has a feasible problem, then
 dropped after solving.
 
+## Velocity is seeded, not learned from rest
+
+A filter starting at rest needs many frames to catch up, so reported speed is biased low
+for a track's whole early life — measured at 1.7× understatement typically and **49×** on
+short tracks. `seed_velocity` sets velocity directly from the first two observations,
+clamped to `MAX_SPEED_MPS` so one noisy pair cannot launch a track.
+
+This mattered beyond cosmetics: the moving/parked filter used to threshold on that speed
+and was discarding real cars doing 60 km/h as "too slow". It now uses displacement over
+duration instead (see [postprocess.md](postprocess.md)), and the seeding keeps the
+*reported* speeds honest.
+
 ## Why a hand-rolled Kalman
 
 The model is four states (`east, north, v_east, v_north`) and the matrices are 4×4, so
@@ -122,7 +135,7 @@ Frames 1000–1300, every 3rd frame: 282 detections → 15 tracks.
 
 ## Tests
 
-`car_tracker/tests/test_track.py` — 37 tests. Kalman convergence and smoothing, ENU
-round-trips, gap bridging versus gap splitting, teleporting detections rejected, and
+`car_tracker/tests/test_track.py` — 38 tests. Kalman convergence and smoothing, ENU
+round-trips, gap bridging versus gap splitting, velocity seeding, and
 `test_crossing_cars_keep_distinct_ids`, which two vehicles passing in opposite
 directions must survive — greedy matching fails it, Hungarian passes.

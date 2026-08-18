@@ -9,7 +9,7 @@ the wrong question.
 
 The discriminator is geometric, not visual. Once tracks are geo-referenced, a parked
 car holds a constant coordinate while the drone flies over it, and a moving car
-translates. Three signals separate them:
+translates. Four signals separate them:
 
 ``displacement``
     Straight-line distance from the first observation to the last. Near zero for a
@@ -20,12 +20,18 @@ translates. Three signals separate them:
     accumulates path length while going nowhere, giving a ratio near zero. A vehicle
     driving down a road approaches one.
 
-``speed``
-    Median filtered speed, which the Kalman filter already provides.
+``heading spread``
+    Circular deviation of the per-step direction. Catches what straightness cannot: a
+    path that reverses repeatedly but still ends up far away scores 1.0 on straightness.
 
-A correction is applied first: drift in the drone's own GPS fix is common-mode, so it
-displaces every projected object together. Left alone it makes whole streets of parked
-cars appear to drift in formation.
+``average speed``
+    Displacement over duration. Deliberately *not* the Kalman filter's own speed, which
+    starts from rest and understates by 1.7x typically and up to 49x on short tracks.
+
+Drift correction exists but is **off by default**: its estimator integrates a per-frame
+median whose small bias accumulates without bound, reporting 117 m of drift on this
+footage where the truth is a few metres, and cancelling real motion when several vehicles
+move together.
 """
 
 from __future__ import annotations

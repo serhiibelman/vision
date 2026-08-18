@@ -22,7 +22,7 @@ Decision log: [`DECISIONS.md`](DECISIONS.md)
 
 ## Status
 
-All seven steps implemented. **264 tests passing, ruff clean.** Pipeline runs end to
+All seven steps implemented. **287 tests passing, ruff clean.** Pipeline runs end to
 end via `car-tracker all`.
 
 | Module | Doc |
@@ -43,7 +43,7 @@ Detector decided: YOLO11 + DOTA weights (see D1). Spike in `car_tracker/spikes/`
 
 | # | Item | Why it matters | Blocker? |
 |---|---|---|---|
-| 1 | **Decide how to handle parking-lot false movers** | 88 reported vs 56 counted manually. Root cause measured; two fixes tried and reverted. Three options in DECISIONS.md D7 | **yes** |
+| 1 | **Two known recall/precision gaps, both measured and documented** | 76 reported vs 56 counted manually. Parking-lot hops inflate it (D7); the 70–85 m detection blind band suppresses it (D8). Both documented rather than fixed | no — decided |
 | 2 | ~~Full-video run on the GPU box~~ | ✅ done: 19,698 detections → 286 tracks, 88 moving | — |
 | 3 | ~~"Challenges encountered" in README~~ | ✅ done, plus a Known limitations section | — |
 | 4 | Commit `results/` artifacts | ✅ `map.html` and `tracks.geojson` are committed | — |
@@ -73,10 +73,12 @@ From the PDF, Task 3:
   neighbouring vehicle. Root cause and rejected fixes: DECISIONS.md D7.
 - **A real bug is currently present**: the association gate is a single scalar taken as the
   maximum over all tracks, so one coasting track widens the gate for everything — this
-  permits 25–35 m single-frame jumps. Fixed on branch `appearance-experiment`, reverted
-  along with the rest.
-- Reported speeds are biased ~30% low: the Kalman filter starts at rest and the median
-  speed includes its warm-up.
+  permits 25–35 m single-frame jumps. A per-track fix was written and reverted; see D7.
+- **Detection is blind over frames ~3163–4142** (70–85 m altitude): 0.8 detections per
+  frame against 4.4–5.8 elsewhere, verified by hand. Cars there are largely missing from
+  the map. See D8.
+- Reported speeds are now seeded rather than starting from rest, so the old ~30% low bias
+  is gone; motion is judged on displacement ÷ duration (D9).
 - Detection recall is ~80% per frame, which is fine — a car spans hundreds of frames
   and tracking closes the gaps. Never measured rigorously (2 frames hand-labelled).
 - Detector box dimensions are unreliable as vehicle length (D5). Not used anywhere.

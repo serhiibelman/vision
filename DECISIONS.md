@@ -9,6 +9,12 @@ Running log of choices made during development, and why.
 **Date:** 2026-08-17
 **Choice:** `yolo11x-obb.pt` (DOTA), tiled 640×640 at native resolution.
 
+> **PARTLY SUPERSEDED — see D8.** The tiling and never-downscale findings below hold. The
+> conclusion "drop COCO" was too strong: it came from aggregate counts over 20 sampled
+> frames plus two hand-checked ones. The two weight sets have complementary blind spots,
+> and DOTA alone is near-blind over frames ~3163–4142. DOTA-only is still the shipped
+> choice, but as an accepted trade rather than because COCO is worse.
+
 **Why:** measured on 20 frames sampled across the video, hand-verified on 2 frames.
 
 | Config | Weights | Input | Detections | Result |
@@ -250,6 +256,91 @@ coloured cars 170–180 — but it was never validated on the full video before 
    vehicles and apply a stricter test only there, instead of penalising everything.
 3. **Accept and report**: ship the map with the limitation documented and the rejected-track
    layer available. This is where the code currently sits.
+
+---
+
+## D8 — Two detectors together: implemented, measured, reverted
+
+**Date:** 2026-08-18
+**Choice:** stay with DOTA-trained weights alone.
+
+**Why it was tried.** Detection density collapses over frames ~3163–4142 (70–85 m
+altitude) to 0.8 per frame against 4.4–5.8 elsewhere, and the dip is non-monotonic so it is
+not an object-size effect. Hand-checked, frame 3620 has ≥9 visible vehicles and one
+detection. Confidence is not the cause: dropping the threshold from 0.25 to 0.05 recovers
+none of them, and isolated upscaled crops return nothing, so those cars are never proposed.
+
+COCO-trained weights cover much of that band. Measured per frame:
+
+| Frame | DOTA | COCO |
+|---|---|---|
+| 540 | 8 | 1 |
+| 600 | 5 | 3 |
+| 660 | 0 | 9 |
+| 3570 | 0 | 8 |
+| 3620 | 1 | 11 |
+| 3710 | 1 | 12 |
+
+Genuinely complementary in both directions — which also **corrects D1**. That entry
+concluded "DOTA-only, drop COCO" from aggregate counts over 20 sampled frames plus a close
+look at two. Too strong a conclusion from too little evidence: neither weight set covers
+this footage alone.
+
+**What was built.** `EnsembleDetector` unioning both models with NMS across the union and a
+`source` column recording provenance, plus `filter_by_ground_size` rejecting detections
+whose implied ground length cannot be a vehicle. That filter was needed because COCO boxes
+buildings; measured, real vehicles run 2.7–5.9 m implied while COCO's false positives reach
+12–50 m, so an 8 m bound separated them. Verified: frame 3550's two shed roofs (11.0 m and
+11.1 m) were both rejected, frame 3620 went from 1 usable detection to 7.
+
+**Why it was reverted.** The resulting map was not an improvement in review. Doubling
+inference (~12 → ~25 min on GPU) and roughly tripling the raw detection count gives
+association many more chances to join adjacent parked cars, and parking-lot hops were
+already the dominant false-positive source (D7).
+
+**Available on branch `appearance-experiment`'s successor if revisited.** The measurements
+above stand regardless; the recall gap over frames 3163–4142 is real and remains
+unaddressed, and is documented as a limitation rather than hidden.
+
+---
+
+## D9 — Motion judged by displacement over duration, and by heading consistency
+
+**Date:** 2026-08-18
+**Choice:** replace the filtered-speed test with displacement ÷ duration, and add a
+heading-spread test. Turn drift correction off by default.
+
+**Filtered speed was unusable as a criterion.** The Kalman filter starts from rest, so
+median speed over a track understates by 1.7× typically and up to **49×** on short tracks.
+Ten real cars were rejected as `too_slow` while covering 15–39 m with straightness
+0.81–0.99 — one travelled 39 m in 2.27 s (62 km/h) and its filtered speed read 1.10 m/s.
+Displacement ÷ duration needs no filter convergence. Velocity is now also seeded from the
+first two observations so *reported* speeds are honest.
+
+**The speed floor is 5 m/s (18 km/h), not near zero,** because during sustained fast
+rotation (~98°/s) parked cars creep 20–28 m over 5–7 s, i.e. ~14 km/h — too slow to be
+driving, too fast to be parked. Cost: a vehicle crawling in a jam below 18 km/h is not
+reported.
+
+**Heading spread catches what straightness cannot.** Straightness compares endpoints to
+path length, so a path that reverses repeatedly but ends far away scores 1.0; one real track
+scored 1.0 with a heading spread of 80°. Measured: a straight run scores <10°, a smooth 90°
+turn ~26°, a U-turn ~52°, and erratic false movers 60–108°. The limit is 50°, which permits
+a U-turn and rejected 28 tracks whose paths visibly could not be driven.
+
+**A short trip counts if its direction is consistent** — 10 m at ≤25° spread — because a car
+entering and leaving frame may only be observed for 10–14 m, and the flat 15 m floor was
+discarding those.
+
+**Drift correction is off by default.** Its estimator sums a per-frame median whose bias
+integrates without bound: 117 m east and −108 m north reported on this footage where the
+truth is a few metres. With six moving and six parked cars in a synthetic test it erased
+all six real movers. It had also been inert for a long time — `smooth_positions` always read
+the raw columns, so the correction was computed and discarded; the flag now does what it
+says.
+
+**Net effect on this footage:** 88 → 76 reported moving against a manual count of 56, with
+composition improved — 10 real cars recovered, 28 impossible paths removed.
 
 ---
 

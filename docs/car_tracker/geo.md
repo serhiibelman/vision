@@ -89,7 +89,7 @@ fields.
 
 ## Tests
 
-`car_tracker/tests/test_geo.py` — 42 tests. Centre pixel invariance under yaw,
+`car_tracker/tests/test_geo.py` — 46 tests. Centre pixel invariance under yaw,
 cardinal-direction mapping, offset distance equals pixels × GSD, `gsd_scale`
 proportionality, metre round-trips, and one asserting a `yaw_sign` flip mirrors the
 output — the exact failure the calibration gate exists to catch.

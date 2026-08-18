@@ -86,14 +86,20 @@ flight path, and satellite/street basemaps. Rejected tracks are kept visible on 
 Full video, every frame (GPU, ~12 min):
 
 ```
-19,698 detections -> 286 tracks
-moving                88      <- manual count of the footage: 56
-rejected: stationary 149
-rejected: too_short   38
-rejected: too_slow    10
-displacement      15 .. 197 m
-median speed      32 km/h
+19,698 detections -> 313 tracks
+moving                 76      <- manual count of the footage: 56
+rejected: stationary  124
+rejected: too_short    76
+rejected: erratic      28
+rejected: implausible_speed 5
+rejected: too_slow      3
+displacement       11 .. 190 m
+average speed      46 km/h
 ```
+
+The count both over- and under-reports, for two independent reasons: parked cars in dense
+lots are joined into false paths, and cars in the blind altitude band are never detected.
+Both are quantified below.
 
 A 10-second window (frames 1000–1300, every 3rd frame), useful as a quick CPU check:
 
@@ -192,6 +198,15 @@ Detection dominates; every other stage takes seconds.
 
 ## Known limitations
 
+**Detection has a blind altitude band.** Over roughly frames 3163–4142 (70–85 m altitude)
+the detector averages **0.8 detections per frame**, against 4.4–5.8 elsewhere. Verified by
+hand: frame 3620 contains at least nine clearly visible vehicles and one is detected.
+Lowering the confidence threshold to 0.05 recovers none of them, so they are never
+proposed rather than scored low. Cars in that stretch are largely absent from the map.
+Details and the rejected two-model fix: [detect.md](docs/car_tracker/detect.md) and
+DECISIONS.md D8.
+
+
 **Moving cars are over-reported: 88 against a manual count of 56.** All the extra ones
 trace to the same cause, and it is geometric rather than a tuning mistake.
 
@@ -232,7 +247,7 @@ obvious ones both cost more than they gained.
 ## Tests
 
 ```bash
-cd car_tracker && pytest        # 264 tests
+cd car_tracker && pytest        # 287 tests
 ruff check src tests
 ```
 

@@ -45,8 +45,17 @@ MIN_DISPLACEMENT_M = 15.0
 # Displacement / path length. Rejects tracks that accumulate distance by jittering.
 MIN_STRAIGHTNESS = 0.4
 
-# Median speed over the track's life.
-MIN_MEDIAN_SPEED_MPS = 1.5
+# Average speed over the track, computed as displacement / duration. Deliberately not
+# the Kalman filter's own speed: that starts at rest and is biased low by its warm-up
+# (1.7x median, up to 49x on short tracks), which rejected real cars doing 60 km/h as
+# "too slow". Displacement over duration needs no filter convergence.
+#
+# The floor is 5 m/s (18 km/h) rather than something near zero because of a measured
+# artifact: during sustained fast rotation (~98 deg/s) parked cars creep 20-28 m over
+# 5-7 s, i.e. ~14 km/h. That is too slow for a car genuinely driving on a street and too
+# fast to be parked, so the floor separates them. Cost: a vehicle crawling in a jam below
+# 18 km/h is not reported.
+MIN_AVERAGE_SPEED_MPS = 5.0
 
 # Tracks shorter than this are too brief to judge, and are usually detector noise.
 MIN_DURATION_S = 0.5
@@ -67,7 +76,7 @@ class MovingCriteria:
 
     min_displacement_m: float = MIN_DISPLACEMENT_M
     min_straightness: float = MIN_STRAIGHTNESS
-    min_median_speed_mps: float = MIN_MEDIAN_SPEED_MPS
+    min_average_speed_mps: float = MIN_AVERAGE_SPEED_MPS
     min_duration_s: float = MIN_DURATION_S
     min_observations: int = MIN_OBSERVATIONS
     max_speed_mps: float = MAX_PLAUSIBLE_SPEED_MPS
@@ -133,18 +142,28 @@ def remove_gps_drift(tracks: pd.DataFrame) -> pd.DataFrame:
     return merged
 
 
-def smooth_positions(tracks: pd.DataFrame, window: int = SMOOTHING_WINDOW) -> pd.DataFrame:
+def smooth_positions(
+    tracks: pd.DataFrame,
+    window: int = SMOOTHING_WINDOW,
+    east_col: str = "east_m",
+    north_col: str = "north_m",
+) -> pd.DataFrame:
     """
     Rolling-median smoothing of each track's position.
 
     A median rather than a mean, so a single badly-placed detection is rejected
     outright instead of being averaged into the path.
+
+    Args:
+        east_col, north_col: source columns. Named explicitly because drift correction
+            writes to ``*_corrected_m``; smoothing the raw columns regardless silently
+            discarded that correction.
     """
     if tracks.empty:
         return tracks.copy()
 
     result = tracks.sort_values(["track_id", "t_sec"]).copy()
-    for source, target in (("east_m", "east_smooth_m"), ("north_m", "north_smooth_m")):
+    for source, target in ((east_col, "east_smooth_m"), (north_col, "north_smooth_m")):
         result[target] = result.groupby("track_id", sort=False)[source].transform(
             lambda values: values.rolling(window, center=True, min_periods=1).median()
         )
@@ -163,7 +182,7 @@ def track_features(
     """
     columns = [
         "track_id", "observations", "duration_s", "displacement_m", "path_length_m",
-        "straightness", "median_speed_mps", "max_speed_mps", "mean_conf",
+        "straightness", "average_speed_mps", "median_speed_mps", "max_speed_mps", "mean_conf",
         "start_lat", "start_lon", "end_lat", "end_lon",
     ]
     if tracks.empty:
@@ -185,6 +204,12 @@ def track_features(
                 # A degenerate zero-length path is stationary by definition, not
                 # perfectly straight.
                 "straightness": float(displacement / path_length) if path_length > 0 else 0.0,
+                # Ground truth for "did this thing move": no filter involved.
+                "average_speed_mps": (
+                    float(displacement / duration) if (duration := float(
+                        group["t_sec"].iloc[-1] - group["t_sec"].iloc[0]
+                    )) > 0 else 0.0
+                ),
                 "median_speed_mps": float(group["speed_mps"].median()),
                 "max_speed_mps": float(group["speed_mps"].max()),
                 "mean_conf": float(group["conf"].mean()) if "conf" in group else float("nan"),
@@ -220,7 +245,7 @@ def classify(
     implausible = result["max_speed_mps"] > criteria.max_speed_mps
     still = result["displacement_m"] < criteria.min_displacement_m
     wandering = result["straightness"] < criteria.min_straightness
-    slow = result["median_speed_mps"] < criteria.min_median_speed_mps
+    slow = result["average_speed_mps"] < criteria.min_average_speed_mps
 
     result["is_moving"] = ~(too_short | implausible | still | wandering | slow)
     # Displacement-based tests come first because they are the most robust signal.
@@ -236,12 +261,21 @@ def classify(
 
 
 def moving_tracks(
-    tracks: pd.DataFrame, criteria: MovingCriteria | None = None
+    tracks: pd.DataFrame,
+    criteria: MovingCriteria | None = None,
+    correct_drift: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Full post-processing pass.
 
-    Applies drift correction and smoothing, measures each track, then classifies it.
+    Applies smoothing, measures each track, then classifies it.
+
+    Drift correction is **off by default**. It addresses a real phenomenon — the drone's
+    own GPS wander displaces every projected object together — but the estimator sums a
+    per-frame median, and the small bias in that median integrates into unbounded false
+    drift: on this footage it reports 117 m east and -108 m north where the truth is a few
+    metres. Left on, it cancels genuine motion when several vehicles move together. Enable
+    it only with evidence of real drift, and check the estimate before trusting it.
 
     Returns:
         ``(observations, features)`` where ``observations`` holds only the rows of
@@ -251,8 +285,13 @@ def moving_tracks(
     if tracks.empty:
         return tracks.copy(), classify(track_features(tracks), criteria)
 
-    corrected = remove_gps_drift(tracks)
-    smoothed = smooth_positions(corrected)
+    if correct_drift:
+        prepared = remove_gps_drift(tracks)
+        smoothed = smooth_positions(
+            prepared, east_col="east_corrected_m", north_col="north_corrected_m"
+        )
+    else:
+        smoothed = smooth_positions(tracks)
     features = classify(
         track_features(smoothed, "east_smooth_m", "north_smooth_m"), criteria
     )

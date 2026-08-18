@@ -72,6 +72,13 @@ used the ellipsoid. That 0.1% mismatch (~1 cm per 8 m) would have put a floor un
 the calibration residual that no amount of fitting could get below. A test comparing
 a projected offset against `haversine_m` caught it.
 
+## Verified externally
+
+Beyond the 0.29 m calibration residual, which is a self-consistency check, the projected
+car paths were confirmed by eye to lie on the actual roads when drawn over satellite
+imagery. A sign or scale error would show up immediately as paths crossing buildings or
+fields.
+
 ## Assumptions
 
 - Flat ground at the projection plane — no DEM, so terrain relief adds error

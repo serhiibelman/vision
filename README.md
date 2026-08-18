@@ -107,6 +107,10 @@ median speed      34.6 km/h
 Calibration accuracy: a static ground point projects to within **0.29 m** from two
 different frames, measured over 35 frame pairs spread across the flight.
 
+**Verified visually**: the plotted car paths lie on the actual roads when the map is viewed
+over satellite imagery. That checks the whole chain externally — SRT parsing, calibration,
+projection, tracking — rather than only self-consistently via the residual above.
+
 The moving count over-reports — see [Known limitations](#known-limitations).
 
 ## Challenges encountered

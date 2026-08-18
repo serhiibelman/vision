@@ -282,3 +282,35 @@ class TestSummarise:
             )
         )
         assert len(summarise(tracks)) == tracks["track_id"].nunique()
+
+
+class TestVelocitySeeding:
+    """
+    Velocity is seeded from the first two observations so reported speed is not biased low
+    by the filter's warm-up from rest.
+    """
+
+    def test_speed_is_right_from_early_on(self):
+        tracks = track_detections(make_detections([straight(0, 0, 15, 0, 10)], frames=10))
+        assert tracks["speed_mps"].iloc[2] == pytest.approx(15.0, rel=0.3)
+
+    def test_median_speed_is_not_understated(self):
+        """
+        Without seeding, the median over a short track sat far below the true speed.
+        """
+        tracks = track_detections(make_detections([straight(0, 0, 15, 0, 20)], frames=20))
+        assert tracks["speed_mps"].median() > 10.0
+
+    def test_seed_is_clamped_to_max_speed(self):
+        from car_tracker.track import MAX_SPEED_MPS, KalmanTrack
+
+        filter_ = KalmanTrack(0.0, 0.0, 0.0)
+        filter_.seed_velocity(500.0, 0.0, 1 / FPS)      # absurd single-frame jump
+        assert filter_.speed_mps == pytest.approx(MAX_SPEED_MPS)
+
+    def test_zero_dt_is_ignored(self):
+        from car_tracker.track import KalmanTrack
+
+        filter_ = KalmanTrack(0.0, 0.0, 0.0)
+        filter_.seed_velocity(10.0, 0.0, 0.0)
+        assert filter_.speed_mps == pytest.approx(0.0)

@@ -160,7 +160,7 @@ class TestClassify:
         strict = classify(track_features(tracks), MovingCriteria(min_displacement_m=100.0))
         lenient = classify(
             track_features(tracks),
-            MovingCriteria(min_displacement_m=1.0, min_median_speed_mps=0.1, min_observations=2),
+            MovingCriteria(min_displacement_m=1.0, min_average_speed_mps=0.1, min_observations=2),
         )
         assert not strict["is_moving"].any()
         assert lenient["is_moving"].all()
@@ -298,3 +298,77 @@ class TestReport:
     def test_includes_speed_summary(self, mixed):
         _, features = moving_tracks(mixed)
         assert "median speed" in report(features)
+
+
+class TestAverageSpeedCriterion:
+    """
+    Motion is judged by displacement / duration, not by the Kalman filter's own speed.
+
+    The filter starts at rest, so its median speed understates by 1.7x typically and up to
+    49x on short tracks — enough to reject real cars doing 60 km/h as "too slow".
+    """
+
+    def test_average_speed_is_displacement_over_duration(self):
+        features = track_features(build({1: driving(speed=12.0, n=60)}))
+        row = features.iloc[0]
+        assert row["average_speed_mps"] == pytest.approx(
+            row["displacement_m"] / row["duration_s"], rel=1e-6
+        )
+
+    def test_real_car_survives_a_broken_filtered_speed(self):
+        """
+        The exact regression: 39 m in 2.3 s, but the filter reports 1.1 m/s.
+        """
+        features = track_features(build({1: driving(speed=17.0, n=70)}))
+        features.loc[0, "median_speed_mps"] = 1.1      # what the filter actually said
+        verdict = classify(features)
+        assert verdict["is_moving"].all()
+
+    def test_slow_creep_is_still_rejected(self):
+        features = classify(track_features(build({1: driving(speed=1.0, n=90)})))
+        assert not features["is_moving"].any()
+
+    def test_zero_duration_does_not_divide_by_zero(self):
+        one = build({1: driving(n=1)})
+        assert track_features(one)["average_speed_mps"].iloc[0] == 0.0
+
+
+class TestDriftCorrectionIsOptional:
+    """
+    Drift correction is off by default: its estimator sums a per-frame median, and the
+    small bias in that median integrates into unbounded false drift (117 m on real data).
+    """
+
+    def test_off_by_default(self, mixed):
+        observations, features = moving_tracks(mixed)
+        assert "east_corrected_m" not in observations.columns
+
+    def test_correction_actually_reaches_the_measurement(self):
+        """
+        It used to be computed and then discarded: smoothing always read the raw columns,
+        so enabling the flag changed nothing at all.
+        """
+        paths = {100 + i: driving(east0=i * 25.0, speed=12.0, n=90) for i in range(6)}
+        paths.update({200 + i: parked(east=i * 12.0, north=30.0, n=90, seed=i) for i in range(6)})
+        tracks = build(paths)
+        _, off = moving_tracks(tracks, correct_drift=False)
+        _, on = moving_tracks(tracks, correct_drift=True)
+        assert int(off["is_moving"].sum()) != int(on["is_moving"].sum())
+
+    def test_can_be_enabled(self, mixed):
+        observations, _ = moving_tracks(mixed, correct_drift=True)
+        assert "east_corrected_m" in observations.columns
+
+    def test_traffic_moving_together_survives_by_default(self):
+        """
+        With correction on, several vehicles moving together look like drone drift and get
+        cancelled. This is what made real movers disappear in dense traffic.
+        """
+        paths = {100 + i: driving(east0=i * 25.0, speed=12.0, n=90) for i in range(6)}
+        paths.update({200 + i: parked(east=i * 12.0, north=30.0, n=90, seed=i) for i in range(6)})
+        tracks = build(paths)
+
+        _, without = moving_tracks(tracks, correct_drift=False)
+        _, with_correction = moving_tracks(tracks, correct_drift=True)
+        assert int(without["is_moving"].sum()) == 6
+        assert int(with_correction["is_moving"].sum()) < 6

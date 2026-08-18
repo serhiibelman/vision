@@ -47,7 +47,7 @@ Detector decided: YOLO11 + DOTA weights (see D1). Spike in `car_tracker/spikes/`
 | 2 | ~~Full-video run on the GPU box~~ | ✅ done: 19,698 detections → 286 tracks, 88 moving | — |
 | 3 | ~~"Challenges encountered" in README~~ | ✅ done, plus a Known limitations section | — |
 | 4 | Commit `results/` artifacts | ✅ `map.html` and `tracks.geojson` are committed | — |
-| 5 | **Visual verification of `results/map.html`** | partially done — the manual count came from it. Still worth confirming paths lie on roads | yes |
+| 5 | ~~Visual verification of `results/map.html`~~ | ✅ done — paths lie on the roads over satellite imagery, validating the geo chain end to end | — |
 | 6 | Reapply the gate fixes deliberately | the scalar-max gate is a genuine bug (allowed 25–35 m jumps) and was reverted with everything else. On branch `appearance-experiment` | no |
 | 7 | Annotated demo clip | not required; most persuasive evidence detection works | no |
 | 8 | `uv.lock` / `requirements-lock.txt` | exact reproducibility | no |
@@ -59,7 +59,7 @@ From the PDF, Task 3:
 | Required | Status |
 |---|---|
 | Code to detect cars, track their paths, plot them on a map | ✅ |
-| A map visualization showing the paths of all detected cars | ⚠️ full video; over-reports moving cars in parking lots, documented |
+| A map visualization showing the paths of all detected cars | ✅ full video, paths verified on roads; over-reports *moving* cars in parking lots, documented |
 | Documentation of approach, methods and assumptions | ✅ README + 9 module docs + architecture |
 | Clean, modular code with comments and docstrings | ✅ |
 | Instructions on how to run | ✅ README |

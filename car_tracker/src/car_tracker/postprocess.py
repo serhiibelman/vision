@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -376,11 +377,11 @@ def to_geojson(
     because it opens directly in any GIS tool or on GitHub.
     """
     lookup = features.set_index("track_id")
-    collection = {"type": "FeatureCollection", "features": []}
+    geojson_features: list[dict[str, Any]] = []
 
     for track_id, group in tracks.sort_values("t_sec").groupby("track_id", sort=True):
         row = lookup.loc[track_id] if track_id in lookup.index else None
-        collection["features"].append(
+        geojson_features.append(
             {
                 "type": "Feature",
                 "geometry": {
@@ -406,6 +407,8 @@ def to_geojson(
                 },
             }
         )
+
+    collection = {"type": "FeatureCollection", "features": geojson_features}
 
     destination = Path(out_path)
     destination.parent.mkdir(parents=True, exist_ok=True)

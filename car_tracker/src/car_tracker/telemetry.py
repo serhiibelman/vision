@@ -90,7 +90,9 @@ def parse_block(block: str) -> dict[str, float | str]:
     return row
 
 
-def ground_sample_distance(rel_alt_m: float | np.ndarray, image_width_px: int = 1920):
+def ground_sample_distance(
+    rel_alt_m: float | np.ndarray, image_width_px: int = 1920
+) -> float | np.ndarray:
     """
     Metres covered by one pixel, for a nadir camera at ``rel_alt_m``.
 

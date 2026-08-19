@@ -1,6 +1,6 @@
 """
 Manual-inspection helper for the detector spike.
-11111111111111111111111111111111111111111111111111111111
+
 Two ways to eyeball which model found which car:
 
 ``--gallery``

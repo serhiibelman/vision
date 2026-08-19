@@ -17,25 +17,25 @@ Inputs: `tech-assignment/video2.MP4` + `video2.SRT`.
 ground point projects to within 0.29 m from two different frames, and the yaw
 convention is resolved (`rotation = +1 * yaw − 0.39°`).
 
-Design rationale: [`docs/car_tracker/architecture.md`](docs/car_tracker/architecture.md)
+Design rationale: [`car_tracker/docs/architecture.md`](car_tracker/docs/architecture.md)
 Decision log: [`DECISIONS.md`](DECISIONS.md)
 
 ## Status
 
-All seven steps implemented. **287 tests passing, ruff clean.** Pipeline runs end to
+All seven steps implemented. **291 tests passing, ruff and mypy clean.** Pipeline runs end to
 end via `car-tracker all`.
 
 | Module | Doc |
 |---|---|
-| `telemetry.py` | [telemetry.md](docs/car_tracker/telemetry.md) |
-| `video.py` | [video.md](docs/car_tracker/video.md) |
-| `geo.py` | [geo.md](docs/car_tracker/geo.md) |
-| `calibrate.py` | [calibrate.md](docs/car_tracker/calibrate.md) |
-| `detect.py` | [detect.md](docs/car_tracker/detect.md) |
-| `track.py` | [track.md](docs/car_tracker/track.md) |
-| `postprocess.py` | [postprocess.md](docs/car_tracker/postprocess.md) |
-| `visualization.py` | [visualization.md](docs/car_tracker/visualization.md) |
-| `cli.py` | [cli.md](docs/car_tracker/cli.md) |
+| `telemetry.py` | [telemetry.md](car_tracker/docs/telemetry.md) |
+| `video.py` | [video.md](car_tracker/docs/video.md) |
+| `geo.py` | [geo.md](car_tracker/docs/geo.md) |
+| `calibrate.py` | [calibrate.md](car_tracker/docs/calibrate.md) |
+| `detect.py` | [detect.md](car_tracker/docs/detect.md) |
+| `track.py` | [track.md](car_tracker/docs/track.md) |
+| `postprocess.py` | [postprocess.md](car_tracker/docs/postprocess.md) |
+| `visualization.py` | [visualization.md](car_tracker/docs/visualization.md) |
+| `cli.py` | [cli.md](car_tracker/docs/cli.md) |
 
 Detector decided: YOLO11 + DOTA weights (see D1). Spike in `car_tracker/spikes/`.
 

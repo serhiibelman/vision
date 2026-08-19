@@ -32,6 +32,9 @@ Core install without the detector (permissive licences only): `pip install -e .`
 
 Place `video2.MP4` and `video2.SRT` in `tech-assignment/`.
 
+Model weights (~110 MB each) download on first use into `~/.cache/car-tracker/models/`.
+Set `CAR_TRACKER_MODELS` to put them elsewhere, or pass an explicit path to `--weights`.
+
 ## Run
 
 Everything at once:
@@ -174,18 +177,34 @@ video2.MP4 ──▶ detect ────────────┤  YOLO11 + DO
 
 | Stage | Module | Doc |
 |---|---|---|
-| Parse SRT | `telemetry.py` | [telemetry.md](docs/car_tracker/telemetry.md) |
-| Frame access | `video.py` | [video.md](docs/car_tracker/video.md) |
-| Pixel → coordinate | `geo.py` | [geo.md](docs/car_tracker/geo.md) |
-| Measure the transform | `calibrate.py` | [calibrate.md](docs/car_tracker/calibrate.md) |
-| Find vehicles | `detect.py` | [detect.md](docs/car_tracker/detect.md) |
-| Link into paths | `track.py` | [track.md](docs/car_tracker/track.md) |
-| Moving vs parked | `postprocess.py` | [postprocess.md](docs/car_tracker/postprocess.md) |
-| Maps | `visualization.py` | [visualization.md](docs/car_tracker/visualization.md) |
+| Parse SRT | `telemetry.py` | [telemetry.md](car_tracker/docs/telemetry.md) |
+| Frame access | `video.py` | [video.md](car_tracker/docs/video.md) |
+| Pixel → coordinate | `geo.py` | [geo.md](car_tracker/docs/geo.md) |
+| Measure the transform | `calibrate.py` | [calibrate.md](car_tracker/docs/calibrate.md) |
+| Find vehicles | `detect.py` | [detect.md](car_tracker/docs/detect.md) |
+| Link into paths | `track.py` | [track.md](car_tracker/docs/track.md) |
+| Moving vs parked | `postprocess.py` | [postprocess.md](car_tracker/docs/postprocess.md) |
+| Maps | `visualization.py` | [visualization.md](car_tracker/docs/visualization.md) |
 
-Design rationale: [architecture.md](docs/car_tracker/architecture.md).
+Design rationale: [architecture.md](car_tracker/docs/architecture.md).
 Why each choice was made, including the ones that turned out wrong:
 [DECISIONS.md](DECISIONS.md). Progress: [PLAN.md](PLAN.md).
+
+### Layout
+
+```
+vision/                     repo; car_tracker is one subproject of it
+├── README.md  PLAN.md  DECISIONS.md
+└── car_tracker/            everything the subproject owns lives here
+    ├── pyproject.toml      packaging, lint and type-check config
+    ├── src/car_tracker/    the import package (src layout: tests run against
+    │                       the installed package, never the working directory)
+    ├── tests/              one module per source module
+    ├── docs/               one document per source module, plus architecture.md
+    ├── spikes/             throwaway experiments, not shipped — see spikes/README.md
+    ├── outputs/            intermediate, regenerable, gitignored
+    └── results/            the small final deliverables, committed
+```
 
 ## Runtime
 
@@ -203,7 +222,7 @@ the detector averages **0.8 detections per frame**, against 4.4–5.8 elsewhere.
 hand: frame 3620 contains at least nine clearly visible vehicles and one is detected.
 Lowering the confidence threshold to 0.05 recovers none of them, so they are never
 proposed rather than scored low. Cars in that stretch are largely absent from the map.
-Details and the rejected two-model fix: [detect.md](docs/car_tracker/detect.md) and
+Details and the rejected two-model fix: [detect.md](car_tracker/docs/detect.md) and
 DECISIONS.md D8.
 
 
@@ -247,8 +266,10 @@ obvious ones both cost more than they gained.
 ## Tests
 
 ```bash
-cd car_tracker && pytest        # 287 tests
-ruff check src tests
+cd car_tracker
+pytest              # 291 tests
+ruff check .        # lint, including spikes/
+mypy                # type check; the package is annotated end to end
 ```
 
 Detection tests stub the model, so no weights or GPU are needed.

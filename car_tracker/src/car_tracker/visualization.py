@@ -198,10 +198,9 @@ def render_tracks(
     Returns:
         The path written.
     """
-    if tracks.empty and telemetry is None:
-        raise ValueError("nothing to draw: no tracks and no telemetry")
-
     if tracks.empty:
+        if telemetry is None:
+            raise ValueError("nothing to draw: no tracks and no telemetry")
         lat = telemetry["lat"].to_numpy()
         lon = telemetry["lon"].to_numpy()
     else:

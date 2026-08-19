@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 from car_tracker.calibrate import calibrate
-from car_tracker.detect import VehicleDetector, frame_range
+from car_tracker.detect import DEFAULT_WEIGHTS, VehicleDetector, frame_range
 from car_tracker.geo import Calibration, CameraModel
 from car_tracker.postprocess import moving_tracks, report, to_geojson
 from car_tracker.telemetry import load as load_telemetry
@@ -51,7 +51,7 @@ def load_calibration(path: str | Path | None) -> Calibration:
     return Calibration(**json.loads(Path(path).read_text(encoding="utf-8")))
 
 
-def _frames(args, frame_count: int) -> list[int]:
+def _frames(args: argparse.Namespace, frame_count: int) -> list[int]:
     """
     Resolve the requested frame numbers from CLI arguments.
     """
@@ -60,7 +60,7 @@ def _frames(args, frame_count: int) -> list[int]:
     return [n for n in numbers if start <= n <= end]
 
 
-def cmd_telemetry(args) -> None:
+def cmd_telemetry(args: argparse.Namespace) -> None:
     telemetry = load_telemetry(args.srt)
     print(summarise_telemetry(telemetry))
     OUTPUTS.mkdir(parents=True, exist_ok=True)
@@ -70,7 +70,7 @@ def cmd_telemetry(args) -> None:
         print(f"wrote {render_flight_path(telemetry, args.map)}")
 
 
-def cmd_calibrate(args) -> None:
+def cmd_calibrate(args: argparse.Namespace) -> None:
     info = probe(args.video)
     telemetry = load_telemetry(args.srt, expected_frames=info.frame_count)
     result = calibrate(args.video, telemetry, image_size=info.size, count=args.pairs)
@@ -78,7 +78,7 @@ def cmd_calibrate(args) -> None:
     print(f"\nwrote {save_calibration(result.calibration, args.out)}")
 
 
-def cmd_detect(args) -> None:
+def cmd_detect(args: argparse.Namespace) -> None:
     info = probe(args.video)
     frames = _frames(args, info.frame_count)
     detector = VehicleDetector(weights=args.weights, confidence=args.conf)
@@ -87,7 +87,7 @@ def cmd_detect(args) -> None:
     print(f"\n{len(detections)} detections -> {args.out}")
 
 
-def cmd_track(args) -> None:
+def cmd_track(args: argparse.Namespace) -> None:
     info = probe(args.video)
     telemetry = load_telemetry(args.srt, expected_frames=info.frame_count)
     detections = pd.read_csv(args.detections)
@@ -100,7 +100,7 @@ def cmd_track(args) -> None:
     print(f"{len(detections)} detections -> {tracks['track_id'].nunique()} tracks -> {args.out}")
 
 
-def cmd_map(args) -> None:
+def cmd_map(args: argparse.Namespace) -> None:
     tracks = pd.read_csv(args.tracks)
     moving, features = moving_tracks(tracks)
     print(report(features))
@@ -117,7 +117,7 @@ def cmd_map(args) -> None:
     features.to_csv(OUTPUTS / "track_features.csv", index=False)
 
 
-def cmd_all(args) -> None:
+def cmd_all(args: argparse.Namespace) -> None:
     """
     Run every stage in order, reusing an existing calibration when present.
     """
@@ -167,20 +167,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    def add_common(sub, video=True, srt=True):
+    def add_common(
+        sub: argparse.ArgumentParser, video: bool = True, srt: bool = True
+    ) -> None:
         if video:
             sub.add_argument("--video", type=Path, default=DEFAULT_VIDEO)
         if srt:
             sub.add_argument("--srt", type=Path, default=DEFAULT_SRT)
 
-    def add_frame_args(sub):
+    def add_frame_args(sub: argparse.ArgumentParser) -> None:
         sub.add_argument("--stride", type=int, default=1, help="process every Nth frame")
         sub.add_argument("--start", type=int, default=1, help="first frame")
         sub.add_argument("--end", type=int, default=None, help="last frame")
         sub.add_argument("--limit", type=int, default=None, help="stop after N frames")
 
-    def add_detector_args(sub):
-        sub.add_argument("--weights", default="yolo11x-obb.pt")
+    def add_detector_args(sub: argparse.ArgumentParser) -> None:
+        sub.add_argument("--weights", default=DEFAULT_WEIGHTS)
         sub.add_argument("--conf", type=float, default=0.25)
 
     telemetry = subparsers.add_parser("telemetry", help="parse the SRT sidecar")

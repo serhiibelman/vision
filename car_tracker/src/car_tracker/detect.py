@@ -17,9 +17,11 @@ Output is one row per detection with the oriented box centroid in pixels, ready 
 from __future__ import annotations
 
 import csv
+import os
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -31,6 +33,14 @@ from car_tracker.video import read_frame, video_capture
 DOTA_VEHICLE_CLASSES = (9, 10)
 
 DEFAULT_WEIGHTS = "yolo11x-obb.pt"
+
+# Ultralytics resolves a bare weights name against the current working directory and
+# downloads there on a miss, so the 100+ MB files would land wherever the command was
+# run from. Pin one location instead; override with CAR_TRACKER_MODELS.
+DEFAULT_WEIGHTS_DIR = Path(
+    os.environ.get("CAR_TRACKER_MODELS")
+    or Path.home() / ".cache" / "car-tracker" / "models"
+)
 DEFAULT_CONFIDENCE = 0.25
 TILE_SIZE = 640
 TILE_STRIDE = 512  # ~20% overlap, so a car near a seam is whole in one tile
@@ -146,6 +156,22 @@ class FrameDetections:
             }
 
 
+def resolve_weights(weights: str | Path, directory: Path = DEFAULT_WEIGHTS_DIR) -> str:
+    """
+    Turn a weights name into an explicit path under ``directory``.
+
+    An existing path or anything containing a separator is passed through untouched, so
+    a caller can still point at weights anywhere. A bare name resolves into the models
+    directory, which is created so ultralytics downloads into it rather than the cwd.
+    """
+    candidate = Path(weights)
+    if candidate.exists() or len(candidate.parts) > 1:
+        return str(candidate)
+
+    directory.mkdir(parents=True, exist_ok=True)
+    return str(directory / candidate)
+
+
 def pick_device() -> int | str:
     """
     CUDA if present, else Apple MPS, else CPU.
@@ -173,6 +199,7 @@ class VehicleDetector:
 
     Args:
         weights: ultralytics weights name or path. Defaults to DOTA-trained OBB.
+            A bare name resolves under :data:`DEFAULT_WEIGHTS_DIR`.
         confidence: score threshold. Deliberately permissive — temporal consistency
             across frames filters false positives better than a high threshold, and
             detections never made cannot be recovered.
@@ -202,7 +229,7 @@ class VehicleDetector:
         self._weights = weights
 
     @property
-    def model(self):
+    def model(self) -> Any:
         """
         The underlying model, loaded on first use so construction stays cheap.
         """
@@ -214,7 +241,7 @@ class VehicleDetector:
                     "ultralytics is not installed; install the 'detect' extra: "
                     "pip install -e '.[detect]'"
                 ) from error
-            self._model = YOLO(self._weights)
+            self._model = YOLO(resolve_weights(self._weights))
             if self.device is None:
                 self.device = pick_device()
         return self._model
@@ -304,7 +331,7 @@ class VehicleDetector:
                     detections = self.detect_frame(read_frame(capture, number), number)
                     frame_rows = list(detections.rows())
                     rows.extend(frame_rows)
-                    if writer is not None:
+                    if writer is not None and handle is not None:
                         writer.writerows(frame_rows)
                         handle.flush()
                     if progress_every and position % progress_every == 0:

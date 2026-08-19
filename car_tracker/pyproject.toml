@@ -6,7 +6,7 @@ requires-python = ">=3.10"
 
 # NOTE: AGPL is inherited via the optional `detect` extra (ultralytics), which is
 # copyleft. Installing only the core dependencies keeps this subproject on
-# permissive licences (BSD / MIT / Apache-2.0). See docs/car_tracker/ for the note.
+# permissive licences (BSD / MIT / Apache-2.0). See docs/ for the note.
 license = { text = "AGPL-3.0-or-later" }
 
 # Core: required under every branch of the design. All permissive.
@@ -25,7 +25,7 @@ dependencies = [
 # index (CUDA vs CPU) because the wheel variant cannot be declared portably here:
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 detect = ["ultralytics>=8.3"]   # AGPL-3.0
-dev = ["pytest>=8.0", "ruff>=0.6"]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]
 
 [project.scripts]
 car-tracker = "car_tracker.cli:main"
@@ -47,3 +47,20 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+files = ["src", "tests"]
+# No python_version pin: numpy's bundled stubs use 3.12-only syntax, so checking
+# against the 3.10 floor declared above fails inside numpy rather than in our code.
+# cv2, folium, ultralytics and pyproj ship no stubs; typing our own code is the point,
+# not re-typing theirs.
+ignore_missing_imports = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+# Full annotations are required of the package itself. Tests are read as prose and are
+# left out of that rule deliberately — annotating every fixture buys nothing.
+module = "car_tracker.*"
+disallow_untyped_defs = true

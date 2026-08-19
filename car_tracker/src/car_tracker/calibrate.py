@@ -126,7 +126,9 @@ def measure_shift(image_a: np.ndarray, image_b: np.ndarray) -> ShiftMeasurement:
     if corners is None or len(corners) < MIN_INLIERS:
         raise CalibrationError(f"only {0 if corners is None else len(corners)} corners found")
 
-    moved, status, _ = cv2.calcOpticalFlowPyrLK(
+    # opencv accepts None for nextPts (it allocates the output itself), but the bundled
+    # stubs type that parameter as required. Runtime behaviour is correct; the stub is not.
+    moved, status, _ = cv2.calcOpticalFlowPyrLK(  # type: ignore[call-overload]
         gray_a, gray_b, corners, None, winSize=LK_WINDOW, maxLevel=LK_PYRAMID_LEVELS
     )
     keep = status.ravel() == 1

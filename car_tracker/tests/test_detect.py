@@ -21,6 +21,7 @@ from car_tracker.detect import (
     VehicleDetector,
     frame_range,
     nms,
+    resolve_weights,
     tile_origins,
 )
 
@@ -337,3 +338,27 @@ class TestFrameRange:
     def test_rejects_bad_stride(self, stride):
         with pytest.raises(ValueError, match="stride"):
             frame_range(10, stride=stride)
+
+
+class TestResolveWeights:
+    """
+    Weights must land in one predictable place rather than the current directory,
+    which is where ultralytics would otherwise download 110 MB files.
+    """
+
+    def test_bare_name_goes_to_the_models_directory(self, tmp_path):
+        assert resolve_weights("yolo11x-obb.pt", tmp_path) == str(tmp_path / "yolo11x-obb.pt")
+
+    def test_directory_is_created_so_the_download_has_somewhere_to_land(self, tmp_path):
+        target = tmp_path / "models"
+        resolve_weights("yolo11n.pt", target)
+        assert target.is_dir()
+
+    def test_explicit_path_is_passed_through(self, tmp_path):
+        assert resolve_weights("/opt/models/custom.pt", tmp_path) == "/opt/models/custom.pt"
+
+    def test_existing_file_in_the_working_directory_wins(self, tmp_path, monkeypatch):
+        local = tmp_path / "local.pt"
+        local.write_bytes(b"")
+        monkeypatch.chdir(tmp_path)
+        assert resolve_weights("local.pt", tmp_path / "models") == "local.pt"

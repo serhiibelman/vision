@@ -4,15 +4,20 @@ Tests for video frame access.
 
 from __future__ import annotations
 
+import threading
+import time
+
 import cv2
 import numpy as np
 import pytest
 
 from car_tracker.video import (
     VideoError,
+    prefetch,
     probe,
     read_frame,
     read_frames,
+    read_frames_from,
     video_capture,
 )
 
@@ -113,3 +118,73 @@ class TestReadFrames:
 
     def test_deduplicates(self, clip):
         assert [n for n, _ in read_frames(clip, [4, 4, 4])] == [4]
+
+
+class TestReadFramesFrom:
+    def test_identifies_frames_correctly(self, clip):
+        """
+        The sequential walk must land on the same frames as the seeking reader.
+        """
+        with video_capture(clip) as capture:
+            got = {n: image.mean() for n, image in read_frames_from(capture, [1, 2, 5, 9])}
+        for number, mean in got.items():
+            assert mean == pytest.approx(number * 20, abs=8)
+
+    def test_matches_read_frame(self, clip):
+        with video_capture(clip) as capture:
+            sequential = [image.mean() for _, image in read_frames_from(capture, [2, 3, 4])]
+        with video_capture(clip) as capture:
+            seeking = [read_frame(capture, n).mean() for n in (2, 3, 4)]
+        assert sequential == pytest.approx(seeking, abs=1)
+
+    def test_survives_a_backward_request(self, clip):
+        """
+        Numbers are sorted, but a caller reusing a capture may start mid-stream.
+        """
+        with video_capture(clip) as capture:
+            read_frame(capture, 8)
+            got = [n for n, _ in read_frames_from(capture, [2, 6])]
+        assert got == [2, 6]
+
+    def test_rejects_zero(self, clip):
+        with video_capture(clip) as capture:
+            with pytest.raises(VideoError, match="1-based"):
+                list(read_frames_from(capture, [0]))
+
+    def test_beyond_end_raises(self, clip):
+        with video_capture(clip) as capture:
+            with pytest.raises(VideoError, match="cannot read"):
+                list(read_frames_from(capture, [COUNT + 50]))
+
+
+class TestPrefetch:
+    def test_preserves_order_and_contents(self):
+        assert list(prefetch(iter(range(20)), depth=3)) == list(range(20))
+
+    def test_empty_source(self):
+        assert list(prefetch(iter([]))) == []
+
+    def test_propagates_producer_errors(self):
+        def failing():
+            yield 1
+            raise VideoError("decode blew up")
+
+        with pytest.raises(VideoError, match="decode blew up"):
+            list(prefetch(failing(), depth=2))
+
+    def test_abandoning_early_stops_the_worker(self):
+        """
+        Breaking out of the loop must not leave a thread blocked on a full queue.
+        """
+        before = threading.active_count()
+        for value in prefetch(iter(range(1000)), depth=2):
+            if value == 3:
+                break
+        deadline = time.monotonic() + 2.0
+        while threading.active_count() > before and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert threading.active_count() == before
+
+    def test_rejects_zero_depth(self):
+        with pytest.raises(ValueError, match="depth"):
+            list(prefetch(iter([1]), depth=0))

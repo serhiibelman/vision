@@ -53,6 +53,38 @@ everything before it.
 Tiles are clamped inward at the last row/column rather than padded, so the model never
 sees black borders.
 
+## Speed
+
+Three things keep the device fed:
+
+**Frames are decoded by walking the stream, not by seeking.** `capture.set(POS_FRAMES, n)`
+makes the decoder jump to the preceding keyframe and re-decode everything up to `n`; at
+stride 1 that repeats most of a GOP per frame. `read_frames_from` walks forward with
+`grab()` instead, decoding each frame exactly once, and falls back to seeking only for
+gaps wider than `SEEK_GAP` (20 frames), where jumping to the next keyframe is cheaper.
+
+Measured on video2, 200 contiguous frames, warm cache:
+
+| Reader | Per frame |
+|---|---|
+| `read_frame` (seek per frame) | 195 ms |
+| `read_frames_from` (forward walk) | **6.5 ms** |
+
+That is ~30x, and it matters: at 195 ms the decoder cost *more* than a GPU forward pass,
+so more than half the wall clock was spent not detecting.
+
+**Decoding runs on a worker thread.** `prefetch` keeps `PREFETCH_DEPTH` frames decoded
+ahead through a bounded queue, so the device does not wait on OpenCV. Both OpenCV and
+torch release the GIL while working, so the overlap is real. With decode down to 6.5 ms
+this now hides only a few percent — it is worth more at wide strides, where seeks come
+back, and on larger frames. `detect_video(..., prefetch_depth=0)` turns it off.
+
+**fp16 on CUDA.** `half` defaults to on for NVIDIA devices and off for MPS and CPU,
+which are slower in fp16, not faster. Pass `half=` to `VehicleDetector` to override.
+
+Not done: batching tiles across several frames, and a TensorRT export. Both help only
+if the full pass is re-run often.
+
 ## Why tiled at native resolution
 
 At the library default `imgsz=640` a 1920-wide frame is downscaled 3×, shrinking a car

@@ -26,7 +26,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from car_tracker.video import read_frame, video_capture
+from car_tracker.video import PREFETCH_DEPTH, prefetch, read_frames_from, video_capture
 
 # DOTA class ids: 9 = large vehicle, 10 = small vehicle. Both are kept; "car" versus
 # "truck" is not a distinction this footage supports at ~57 px.
@@ -193,6 +193,13 @@ def pick_device() -> int | str:
     return "cpu"
 
 
+def is_cuda(device: int | str) -> bool:
+    """
+    Whether ``device`` names an NVIDIA GPU, in either the int or string spelling.
+    """
+    return isinstance(device, int) or str(device).startswith("cuda")
+
+
 class VehicleDetector:
     """
     Tiled oriented-box vehicle detector.
@@ -207,6 +214,8 @@ class VehicleDetector:
         tile: tile edge length in pixels.
         stride: distance between tile origins.
         device: overrides auto-detection.
+        half: run inference in fp16. Defaults to on for CUDA and off elsewhere;
+            MPS and CPU are slower in fp16, not faster.
         model: pre-built model, primarily for testing without weights on disk.
     """
 
@@ -218,6 +227,7 @@ class VehicleDetector:
         tile: int = TILE_SIZE,
         stride: int = TILE_STRIDE,
         device: int | str | None = None,
+        half: bool | None = None,
         model: object | None = None,
     ) -> None:
         self.confidence = confidence
@@ -225,6 +235,7 @@ class VehicleDetector:
         self.tile = tile
         self.stride = stride
         self.device = device
+        self.half = half
         self._model = model
         self._weights = weights
 
@@ -244,6 +255,8 @@ class VehicleDetector:
             self._model = YOLO(resolve_weights(self._weights))
             if self.device is None:
                 self.device = pick_device()
+            if self.half is None:
+                self.half = is_cuda(self.device)
         return self._model
 
     def detect_frame(self, image: np.ndarray, frame: int) -> FrameDetections:
@@ -257,12 +270,14 @@ class VehicleDetector:
         origins = tile_origins(width, height, self.tile, self.stride)
         crops = [image[y : y + self.tile, x : x + self.tile] for x, y in origins]
 
-        results = self.model(
+        model = self.model  # resolves the device and, with it, self.half
+        results = model(
             crops,
             imgsz=self.tile,
             conf=self.confidence,
             classes=self.classes,
             device=self.device,
+            half=bool(self.half),
             verbose=False,
         )
 
@@ -301,12 +316,18 @@ class VehicleDetector:
         frames: Iterable[int],
         out_path: str | Path | None = None,
         progress_every: int = 50,
+        prefetch_depth: int = PREFETCH_DEPTH,
     ) -> pd.DataFrame:
         """
         Detect across many frames, optionally streaming results to CSV.
 
-        Rows are flushed as each frame completes, so a long run that crashes near the
-        end still leaves everything detected so far on disk.
+        Frames are decoded on a worker thread running ahead of inference, so the device
+        does not wait on the decoder. Rows are flushed as each frame completes, so a
+        long run that crashes near the end still leaves everything detected so far on
+        disk.
+
+        Args:
+            prefetch_depth: frames decoded ahead. 0 disables the worker thread.
 
         Returns:
             All detections as a DataFrame with :data:`COLUMNS`.
@@ -327,8 +348,11 @@ class VehicleDetector:
 
         try:
             with video_capture(video_path) as capture:
-                for position, number in enumerate(wanted, start=1):
-                    detections = self.detect_frame(read_frame(capture, number), number)
+                decoded = read_frames_from(capture, wanted)
+                if prefetch_depth:
+                    decoded = prefetch(decoded, prefetch_depth)
+                for position, (number, image) in enumerate(decoded, start=1):
+                    detections = self.detect_frame(image, number)
                     frame_rows = list(detections.rows())
                     rows.extend(frame_rows)
                     if writer is not None and handle is not None:

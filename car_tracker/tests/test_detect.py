@@ -9,6 +9,8 @@ tests need no weights and no GPU.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -20,7 +22,9 @@ from car_tracker.detect import (
     FrameDetections,
     VehicleDetector,
     frame_range,
+    is_cuda,
     nms,
+    precision_kwargs,
     resolve_weights,
     tile_origins,
 )
@@ -362,3 +366,67 @@ class TestResolveWeights:
         local.write_bytes(b"")
         monkeypatch.chdir(tmp_path)
         assert resolve_weights("local.pt", tmp_path / "models") == "local.pt"
+
+
+class TestIsCuda:
+    @pytest.mark.parametrize("device", [0, 1, "cuda", "cuda:0"])
+    def test_recognises_nvidia(self, device):
+        assert is_cuda(device)
+
+    @pytest.mark.parametrize("device", ["cpu", "mps"])
+    def test_rejects_the_rest(self, device):
+        assert not is_cuda(device)
+
+
+class TestPrecisionKwargs:
+    def test_fp32_passes_nothing(self):
+        """
+        ultralytics warns on `half` even when it is False, so fp32 must stay silent.
+        """
+        assert precision_kwargs(False) == {}
+
+    def test_fp16_uses_the_installed_spelling(self):
+        kwargs = precision_kwargs(True)
+        assert kwargs in ({"quantize": 16}, {"half": True})
+
+    def test_matches_this_ultralytics(self):
+        from ultralytics.cfg import DEFAULT_CFG_DICT
+
+        expected = "quantize" if "quantize" in DEFAULT_CFG_DICT else "half"
+        assert list(precision_kwargs(True)) == [expected]
+
+    def test_requested_precision_reaches_the_model(self):
+        """
+        The argument must survive the trip through detect_frame, not just exist.
+        """
+        seen = {}
+
+        class RecordingModel(FakeModel):
+            def __call__(self, crops, **kwargs):
+                seen.update(kwargs)
+                return super().__call__(crops, **kwargs)
+
+        detector = VehicleDetector(model=RecordingModel(), half=True)
+        detector.device = "cpu"
+        detector.detect_frame(np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8), 1)
+        assert seen.get("quantize") == 16 or seen.get("half") is True
+
+    @pytest.mark.parametrize("half", [False, True])
+    def test_ultralytics_accepts_it_without_deprecating(self, half, caplog):
+        """
+        Regression: ultralytics warns on `half` even when it is False. The warning goes
+        through its LOGGER rather than the warnings module, so assert on the log.
+        """
+        handle = pytest.importorskip("ultralytics.cfg")._handle_deprecation
+        with caplog.at_level(logging.WARNING, logger="ultralytics"):
+            handle(dict(precision_kwargs(half)))
+        assert "deprecated" not in caplog.text
+
+    def test_the_old_spelling_would_have_warned(self, caplog):
+        """
+        Guards the test above: proves the assertion can actually fail.
+        """
+        handle = pytest.importorskip("ultralytics.cfg")._handle_deprecation
+        with caplog.at_level(logging.WARNING, logger="ultralytics"):
+            handle({"half": False})
+        assert "deprecated" in caplog.text

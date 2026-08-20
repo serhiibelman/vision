@@ -200,6 +200,25 @@ def is_cuda(device: int | str) -> bool:
     return isinstance(device, int) or str(device).startswith("cuda")
 
 
+def precision_kwargs(half: bool) -> dict[str, Any]:
+    """
+    Predict-call arguments requesting fp16, spelled for the installed ultralytics.
+
+    ``half`` was deprecated in 8.4 in favour of ``quantize``, and passing it at all —
+    ``half=False`` included — emits a DeprecationWarning. The package supports >=8.3,
+    so both spellings have to be reachable; the installed default config decides which.
+
+    Nothing is passed when fp32 is wanted, since fp32 is already the default.
+    """
+    if not half:
+        return {}
+    try:
+        from ultralytics.cfg import DEFAULT_CFG_DICT
+    except ImportError:  # pragma: no cover - depends on optional extra
+        return {"half": True}
+    return {"quantize": 16} if "quantize" in DEFAULT_CFG_DICT else {"half": True}
+
+
 class VehicleDetector:
     """
     Tiled oriented-box vehicle detector.
@@ -215,7 +234,8 @@ class VehicleDetector:
         stride: distance between tile origins.
         device: overrides auto-detection.
         half: run inference in fp16. Defaults to on for CUDA and off elsewhere;
-            MPS and CPU are slower in fp16, not faster.
+            MPS and CPU are slower in fp16, not faster. Translated to whichever
+            argument the installed ultralytics wants, see :func:`precision_kwargs`.
         model: pre-built model, primarily for testing without weights on disk.
     """
 
@@ -277,8 +297,8 @@ class VehicleDetector:
             conf=self.confidence,
             classes=self.classes,
             device=self.device,
-            half=bool(self.half),
             verbose=False,
+            **precision_kwargs(bool(self.half)),
         )
 
         boxes, centres, sizes, angles, confidences, classes = [], [], [], [], [], []

@@ -82,6 +82,12 @@ back, and on larger frames. `detect_video(..., prefetch_depth=0)` turns it off.
 **fp16 on CUDA.** `half` defaults to on for NVIDIA devices and off for MPS and CPU,
 which are slower in fp16, not faster. Pass `half=` to `VehicleDetector` to override.
 
+ultralytics deprecated its own `half` argument in 8.4 in favour of `quantize`, and
+warns even when it is passed as `False`. `precision_kwargs` therefore sends `quantize=16`
+on 8.4+, `half=True` on 8.3, and *nothing at all* for fp32 — fp32 is already the default,
+so there is no reason to name it. The `half=` argument on `VehicleDetector` is ours and
+is unaffected.
+
 Not done: batching tiles across several frames, and a TensorRT export. Both help only
 if the full pass is re-run often.
 
